@@ -251,10 +251,8 @@ namespace GraveRobbers.Player
             if (!_localReady || !IsOwner)
                 return;
 
-            // Host/Client IMGUI click unlocks the cursor in the Editor — re-lock every frame until Esc.
-            if (lockCursor && Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
-                _wantCursorLock = !_wantCursorLock;
-
+            // Esc bakışı kapatmaz; cursor oyun sırasında kilitli kalır.
+            _wantCursorLock = lockCursor;
             ApplyCursorState();
             HandleLook();
             HandleMove();
