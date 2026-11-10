@@ -2,6 +2,7 @@ using GraveRobbers.Player;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
 
 namespace GraveRobbers.Interaction
 {
@@ -26,8 +27,17 @@ namespace GraveRobbers.Interaction
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
+        static readonly Color CrosshairGlow = new Color(1f, 0.78f, 0.25f, 1f);
+        static Sprite _dotSprite;
+
         LootItem _lookTarget;
         LootItem _serverHeld;
+        GameObject _hudRoot;
+        Image _crosshairDot;
+        Image _crosshairGlow;
+        RectTransform _crosshairDotRect;
+        RectTransform _crosshairGlowRect;
+        bool _crosshairOnLoot;
 
         public bool IsHolding => _heldLootRef.Value.TryGet(out NetworkObject _);
 
@@ -49,6 +59,9 @@ namespace GraveRobbers.Interaction
             if (lootMask.value == 0)
                 lootMask = LayerMask.GetMask("Loot");
 
+            if (IsOwner)
+                EnsureHud();
+
             RefreshCarrySpeed();
         }
 
@@ -61,7 +74,11 @@ namespace GraveRobbers.Interaction
                 ServerReleaseHeld(Vector3.zero);
 
             if (IsOwner)
+            {
                 ClearHighlight();
+                if (_hudRoot != null)
+                    Destroy(_hudRoot);
+            }
 
             base.OnNetworkDespawn();
         }
@@ -91,6 +108,12 @@ namespace GraveRobbers.Interaction
                 return;
 
             UpdateLookTarget();
+            if (_crosshairOnLoot)
+            {
+                float pulse = 0.8f + 0.2f * Mathf.Sin(Time.unscaledTime * 2.2f);
+                ApplyCrosshairVisual(pulse);
+            }
+
             HandleInput();
         }
 
@@ -117,6 +140,116 @@ namespace GraveRobbers.Interaction
 
             if (_lookTarget != null)
                 _lookTarget.SetHighlight(true);
+
+            if (_hudRoot == null)
+                EnsureHud();
+
+            SetCrosshairLoot(_lookTarget != null);
+        }
+
+        void EnsureHud()
+        {
+            if (_hudRoot != null)
+                return;
+
+            var canvasGo = new GameObject("PlayerHud");
+            var canvas = canvasGo.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 40;
+
+            var scaler = canvasGo.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+
+            CreateCrosshair(canvasGo.transform);
+
+            _hudRoot = canvasGo;
+            SetCrosshairLoot(false);
+        }
+
+        void CreateCrosshair(Transform parent)
+        {
+            var root = new GameObject("Crosshair");
+            root.transform.SetParent(parent, false);
+            var rootRect = root.AddComponent<RectTransform>();
+            rootRect.anchorMin = new Vector2(0.5f, 0.5f);
+            rootRect.anchorMax = new Vector2(0.5f, 0.5f);
+            rootRect.pivot = new Vector2(0.5f, 0.5f);
+            rootRect.anchoredPosition = Vector2.zero;
+            rootRect.sizeDelta = Vector2.zero;
+
+            _crosshairGlow = CreateDot(root.transform, "Glow", 28f);
+            _crosshairGlowRect = _crosshairGlow.rectTransform;
+            _crosshairDot = CreateDot(root.transform, "Dot", 7f);
+            _crosshairDotRect = _crosshairDot.rectTransform;
+        }
+
+        Image CreateDot(Transform parent, string name, float size)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var rect = go.AddComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(size, size);
+
+            var image = go.AddComponent<Image>();
+            image.sprite = DotSprite();
+            image.color = Color.white;
+            image.raycastTarget = false;
+            return image;
+        }
+
+        static Sprite DotSprite()
+        {
+            if (_dotSprite != null)
+                return _dotSprite;
+
+            const int size = 64;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+            float half = (size - 1) * 0.5f;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x - half) / half;
+                    float dy = (y - half) / half;
+                    float distance = Mathf.Sqrt(dx * dx + dy * dy);
+                    float alpha = Mathf.Clamp01(1f - distance);
+                    alpha *= alpha;
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
+                }
+            }
+
+            tex.Apply();
+            tex.hideFlags = HideFlags.HideAndDontSave;
+            _dotSprite = Sprite.Create(tex, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), 100f);
+            _dotSprite.hideFlags = HideFlags.HideAndDontSave;
+            return _dotSprite;
+        }
+
+        void SetCrosshairLoot(bool onLoot)
+        {
+            _crosshairOnLoot = onLoot;
+            ApplyCrosshairVisual(onLoot ? 1f : 0f);
+        }
+
+        void ApplyCrosshairVisual(float glow)
+        {
+            if (_crosshairDot == null || _crosshairGlow == null)
+                return;
+
+            _crosshairDot.color = Color.Lerp(Color.white, new Color(1f, 0.96f, 0.8f, 1f), glow);
+            _crosshairDotRect.sizeDelta = Vector2.one * Mathf.Lerp(7f, 9f, glow);
+
+            var glowColor = CrosshairGlow;
+            glowColor.a = Mathf.Lerp(0f, 0.95f, glow);
+            _crosshairGlow.color = glowColor;
+            _crosshairGlowRect.sizeDelta = Vector2.one * Mathf.Lerp(14f, 46f, glow);
         }
 
         void ClearHighlight()

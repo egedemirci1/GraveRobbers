@@ -52,11 +52,19 @@ Dar iç mekanlar, kapı kırma vs maymuncuk. Ağır kasalar ileride 2+ oyuncu bi
 - Tek elde tek eşya; ağırlığa göre hafif hız düşüşü.
 - Tutma: Server kinematic + NetworkObject.TrySetParent(HoldPoint); bırakınca parent kalkar, fizik açılır.
 
-## 2.5. Mistik Eşyalar & Lanetli Sunak
+## 2.5. Silah ve Eşya Geçişi
+
+- Oyuncunun birincil silahı vardır. Elde taşınabilir eşya varken ateş edilemez.
+- Eşya alınca silah yere düşmez. Sırta veya bele kılıflanır ve oyuncuda kalır; başka oyuncu bu silahı alamaz.
+- Eşya bırakılınca (E) veya fırlatılınca (sol tık) silah ele geri gelir.
+- El doluyken yazı "E - Bırak" olur. Ateş tuşuna basılırsa kısa süre "Ellerin dolu" görünür. Mermi göstergesi el doluyken gizlenir.
+- Nişangah sürekli açıktır ve ortada beyaz bir noktadır. Bakış, yerde duran ve kimsenin tutmadığı taşınabilir bir eşyanın üzerindeyken nokta parlar.
+
+## 2.6. Mistik Eşyalar & Lanetli Sunak
 
 Tek kullanımlık mistik itemler; sunakta %50 iyi / %50 kötü kumar.
 
-## 2.6. Safe Zone & Ekonomi
+## 2.7. Safe Zone & Ekonomi
 
 Loot sat → benzin al → upgrade → daha tehlikeli bölge.
 
