@@ -202,6 +202,7 @@ namespace GraveRobbers.Editor
             body.name = "Body";
             body.transform.SetParent(player.transform, false);
             body.transform.localPosition = new Vector3(0f, 0.9f, 0f);
+            body.SetActive(false);
             Object.DestroyImmediate(body.GetComponent<Collider>());
 
             Material bodyMat = CreateLitMaterial("PlayerBody", new Color(0.55f, 0.55f, 0.6f));
@@ -238,6 +239,16 @@ namespace GraveRobbers.Editor
             so.FindProperty("inputActions").objectReferenceValue = inputAsset;
             so.FindProperty("cameraTransform").objectReferenceValue = cameraPivot.transform;
             so.FindProperty("bodyRenderer").objectReferenceValue = body.GetComponent<MeshRenderer>();
+            SerializedProperty characters = so.FindProperty("characterPrefabs");
+            characters.arraySize = 4;
+            characters.GetArrayElementAtIndex(0).objectReferenceValue =
+                AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Floreswa/Prefabs/male01_1.prefab");
+            characters.GetArrayElementAtIndex(1).objectReferenceValue =
+                AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Floreswa/Prefabs/male02_1.prefab");
+            characters.GetArrayElementAtIndex(2).objectReferenceValue =
+                AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Floreswa/Prefabs/male03_1.prefab");
+            characters.GetArrayElementAtIndex(3).objectReferenceValue =
+                AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Floreswa/Prefabs/male01_2.prefab");
             so.ApplyModifiedPropertiesWithoutUndo();
 
             var pso = new SerializedObject(pickup);

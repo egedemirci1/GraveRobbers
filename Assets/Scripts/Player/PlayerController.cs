@@ -24,6 +24,7 @@ namespace GraveRobbers.Player
         [SerializeField] InputActionAsset inputActions;
         [SerializeField] Transform cameraTransform;
         [SerializeField] MeshRenderer bodyRenderer;
+        [SerializeField] GameObject[] characterPrefabs;
 
         [Header("Movement")]
         [SerializeField] float walkSpeed = 4.5f;
@@ -89,7 +90,7 @@ namespace GraveRobbers.Player
             base.OnNetworkSpawn();
 
             _spawnIndex.OnValueChanged += OnSpawnIndexChanged;
-            ApplyBodyTint();
+            AttachCharacterVisual();
 
             if (IsServer)
             {
@@ -166,6 +167,66 @@ namespace GraveRobbers.Player
 
             if (_audioListener != null)
                 _audioListener.enabled = active;
+        }
+
+        void AttachCharacterVisual()
+        {
+            Transform capsule = transform.Find("Body");
+            if (characterPrefabs == null || characterPrefabs.Length == 0)
+            {
+                if (capsule != null)
+                    capsule.gameObject.SetActive(true);
+                ApplyBodyTint();
+                return;
+            }
+
+            if (capsule != null)
+                capsule.gameObject.SetActive(false);
+
+            int index = (int)(OwnerClientId % (ulong)characterPrefabs.Length);
+            GameObject prefab = characterPrefabs[index];
+            if (prefab == null)
+                return;
+
+            Transform existing = transform.Find("Character");
+            if (existing != null)
+                Destroy(existing.gameObject);
+
+            GameObject visual = Instantiate(prefab, transform);
+            visual.name = "Character";
+            visual.transform.localPosition = Vector3.zero;
+            visual.transform.localRotation = Quaternion.identity;
+            visual.transform.localScale = Vector3.one;
+
+            if (IsOwner)
+                PlaceCameraAtEyes(visual.transform);
+
+            GetComponent<PlayerWalkAnimation>()?.Bind(visual, index);
+        }
+
+        void PlaceCameraAtEyes(Transform visual)
+        {
+            if (cameraTransform == null)
+                return;
+
+            Transform head = FindNamed(visual, "spine.006");
+            Vector3 eyes = head != null ? head.position : transform.position + Vector3.up * 1.65f;
+            cameraTransform.position = eyes + transform.forward * 0.18f;
+        }
+
+        static Transform FindNamed(Transform root, string name)
+        {
+            if (root.name == name)
+                return root;
+
+            for (int i = 0; i < root.childCount; i++)
+            {
+                Transform found = FindNamed(root.GetChild(i), name);
+                if (found != null)
+                    return found;
+            }
+
+            return null;
         }
 
         void ApplyBodyTint()
@@ -328,6 +389,7 @@ namespace GraveRobbers.Player
 
             float speed = (wantsSprint ? sprintSpeed : walkSpeed) * SpeedMultiplier;
             _controller.Move(move * (speed * Time.deltaTime));
+            GetComponent<PlayerWalkAnimation>()?.SetPlanarSpeed(move.magnitude * speed);
 
             if (_jumpQueued && grounded)
                 _velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);

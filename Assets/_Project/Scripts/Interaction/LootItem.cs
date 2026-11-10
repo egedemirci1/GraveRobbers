@@ -27,7 +27,8 @@ namespace GraveRobbers.Interaction
 
         Rigidbody _body;
         NetworkTransform _networkTransform;
-        Color _baseColor;
+        MeshRenderer[] _renderers = System.Array.Empty<MeshRenderer>();
+        Color _baseColor = Color.white;
         bool _highlighted;
 
         public float Weight => weight;
@@ -36,11 +37,19 @@ namespace GraveRobbers.Interaction
         {
             _body = GetComponent<Rigidbody>();
             _networkTransform = GetComponent<NetworkTransform>();
-            if (meshRenderer == null)
-                meshRenderer = GetComponent<MeshRenderer>();
+            if (meshRenderer != null)
+                _renderers = new[] { meshRenderer };
+            else
+                _renderers = GetComponentsInChildren<MeshRenderer>(true);
 
-            if (meshRenderer != null && meshRenderer.sharedMaterial != null)
-                _baseColor = ReadColor(meshRenderer.sharedMaterial);
+            for (int i = 0; i < _renderers.Length; i++)
+            {
+                if (_renderers[i] != null && _renderers[i].sharedMaterial != null)
+                {
+                    _baseColor = ReadColor(_renderers[i].sharedMaterial);
+                    break;
+                }
+            }
         }
 
         public override void OnNetworkSpawn()
@@ -66,7 +75,7 @@ namespace GraveRobbers.Interaction
 
         public void SetHighlight(bool on)
         {
-            if (meshRenderer == null || _highlighted == on)
+            if (_renderers == null || _renderers.Length == 0 || _highlighted == on)
                 return;
 
             _highlighted = on;
@@ -126,14 +135,18 @@ namespace GraveRobbers.Interaction
 
         void ApplyColor(Color color)
         {
-            if (meshRenderer == null)
-                return;
+            for (int i = 0; i < _renderers.Length; i++)
+            {
+                MeshRenderer renderer = _renderers[i];
+                if (renderer == null)
+                    continue;
 
-            var mat = meshRenderer.material;
-            if (mat.HasProperty("_BaseColor"))
-                mat.SetColor("_BaseColor", color);
-            else
-                mat.color = color;
+                var mat = renderer.material;
+                if (mat.HasProperty("_BaseColor"))
+                    mat.SetColor("_BaseColor", color);
+                else
+                    mat.color = color;
+            }
         }
 
         static Color ReadColor(Material mat)
