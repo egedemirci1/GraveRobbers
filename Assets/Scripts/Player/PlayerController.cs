@@ -44,6 +44,7 @@ namespace GraveRobbers.Player
             NetworkVariableWritePermission.Server);
 
         CharacterController _controller;
+        PlayerStamina _stamina;
         Camera _camera;
         AudioListener _audioListener;
         InputActionMap _playerMap;
@@ -63,6 +64,7 @@ namespace GraveRobbers.Player
         void Awake()
         {
             _controller = GetComponent<CharacterController>();
+            _stamina = GetComponent<PlayerStamina>();
             _camera = GetComponentInChildren<Camera>(true);
             _audioListener = GetComponentInChildren<AudioListener>(true);
 
@@ -317,8 +319,14 @@ namespace GraveRobbers.Player
             if (move.sqrMagnitude > 1f)
                 move.Normalize();
 
-            bool sprinting = _sprintAction.IsPressed();
-            float speed = (sprinting ? sprintSpeed : walkSpeed) * SpeedMultiplier;
+            bool wantsSprint = _sprintAction.IsPressed() && move.sqrMagnitude > 0.01f;
+            if (_stamina != null)
+            {
+                _stamina.TickSprint(wantsSprint && _stamina.CanSprint);
+                wantsSprint = wantsSprint && _stamina.CanSprint;
+            }
+
+            float speed = (wantsSprint ? sprintSpeed : walkSpeed) * SpeedMultiplier;
             _controller.Move(move * (speed * Time.deltaTime));
 
             if (_jumpQueued && grounded)

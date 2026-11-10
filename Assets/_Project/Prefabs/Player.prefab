@@ -182,6 +182,7 @@ GameObject:
   - component: {fileID: 6496305850240629564}
   - component: {fileID: 1629743391254410501}
   - component: {fileID: 73756318090478214}
+  - component: {fileID: 7045123896601122334}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -349,6 +350,29 @@ MonoBehaviour:
   lootMask:
     serializedVersion: 2
     m_Bits: 64
+--- !u!114 &7045123896601122334
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2234639913814718135}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e8c41b7a2d9f4c0e91ab6d3f5e7c8a20, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GraveRobbers.Player.PlayerStamina
+  maxStamina: 100
+  drainPerSecond: 35
+  regenPerSecond: 3.5
+  regenDelay: 1.5
+  resumeAt: 25
+  effectStartNormalized: 0.65
+  effectFadeInSpeed: 2.2
+  effectFadeOutSpeed: 0.22
+  maxBlurIntensity: 1
+  maxVignetteIntensity: 0.40
+  vignetteSmoothness: 0.40
 --- !u!1 &2234981862046900635
 GameObject:
   m_ObjectHideFlags: 0

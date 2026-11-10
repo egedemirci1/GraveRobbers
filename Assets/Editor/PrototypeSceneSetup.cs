@@ -230,6 +230,7 @@ namespace GraveRobbers.Editor
             player.AddComponent<NetworkObject>();
             player.AddComponent<ClientNetworkTransform>();
             var playerController = player.AddComponent<PlayerController>();
+            player.AddComponent<PlayerStamina>();
             var pickup = player.AddComponent<PickupSystem>();
 
             var inputAsset = AssetDatabase.LoadAssetAtPath<InputActionAsset>(InputActionsPath);
