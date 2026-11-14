@@ -198,10 +198,10 @@ namespace GraveRobbers.Player
             visual.transform.localRotation = Quaternion.identity;
             visual.transform.localScale = Vector3.one;
 
+            GetComponent<PlayerWalkAnimation>()?.Bind(visual, index);
+
             if (IsOwner)
                 PlaceCameraAtEyes(visual.transform);
-
-            GetComponent<PlayerWalkAnimation>()?.Bind(visual, index);
         }
 
         void PlaceCameraAtEyes(Transform visual)
@@ -210,8 +210,27 @@ namespace GraveRobbers.Player
                 return;
 
             Transform head = FindNamed(visual, "spine.006");
-            Vector3 eyes = head != null ? head.position : transform.position + Vector3.up * 1.65f;
-            cameraTransform.position = eyes + transform.forward * 0.18f;
+            if (head == null)
+                head = FindHead(visual);
+
+            if (head == null)
+            {
+                cameraTransform.position = transform.position + Vector3.up * 1.65f;
+                return;
+            }
+
+            Transform crown = FindNamed(head, "spine.006_end");
+            Vector3 up = crown != null ? crown.position - head.position : transform.up;
+            if (up.sqrMagnitude < 0.0001f)
+                up = transform.up;
+
+            // Neck joint sits inside the skull. Eyes are partway to the crown
+            // and forward of the face, so the view is not inside the head.
+            Vector3 eyes = head.position + up.normalized * (up.magnitude * 0.28f);
+            Vector3 face = Vector3.ProjectOnPlane(transform.forward, transform.up);
+            if (face.sqrMagnitude < 0.0001f)
+                face = transform.forward;
+            cameraTransform.position = eyes + face.normalized * 0.3f;
         }
 
         static Transform FindNamed(Transform root, string name)
@@ -222,6 +241,21 @@ namespace GraveRobbers.Player
             for (int i = 0; i < root.childCount; i++)
             {
                 Transform found = FindNamed(root.GetChild(i), name);
+                if (found != null)
+                    return found;
+            }
+
+            return null;
+        }
+
+        static Transform FindHead(Transform root)
+        {
+            if (root.name == "Head" || root.name.EndsWith(":Head"))
+                return root;
+
+            for (int i = 0; i < root.childCount; i++)
+            {
+                Transform found = FindHead(root.GetChild(i));
                 if (found != null)
                     return found;
             }
@@ -389,7 +423,8 @@ namespace GraveRobbers.Player
 
             float speed = (wantsSprint ? sprintSpeed : walkSpeed) * SpeedMultiplier;
             _controller.Move(move * (speed * Time.deltaTime));
-            GetComponent<PlayerWalkAnimation>()?.SetPlanarSpeed(move.magnitude * speed);
+            bool moving = move.sqrMagnitude > 0.01f;
+            GetComponent<PlayerWalkAnimation>()?.SetLocomotion(move.magnitude * speed, wantsSprint && moving);
 
             if (_jumpQueued && grounded)
                 _velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
