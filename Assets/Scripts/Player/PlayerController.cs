@@ -44,8 +44,24 @@ namespace GraveRobbers.Player
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
+        readonly NetworkVariable<float> _animSpeed = new(
+            0f,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Owner);
+
+        readonly NetworkVariable<bool> _animSprint = new(
+            false,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Owner);
+
+        readonly NetworkVariable<bool> _animGrounded = new(
+            true,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Owner);
+
         CharacterController _controller;
         PlayerStamina _stamina;
+        PlayerWalkAnimation _walkAnimation;
         Camera _camera;
         AudioListener _audioListener;
         InputActionMap _playerMap;
@@ -70,6 +86,7 @@ namespace GraveRobbers.Player
         {
             _controller = GetComponent<CharacterController>();
             _stamina = GetComponent<PlayerStamina>();
+            _walkAnimation = GetComponent<PlayerWalkAnimation>();
             _camera = GetComponentInChildren<Camera>(true);
             _audioListener = GetComponentInChildren<AudioListener>(true);
 
@@ -94,7 +111,11 @@ namespace GraveRobbers.Player
             base.OnNetworkSpawn();
 
             _spawnIndex.OnValueChanged += OnSpawnIndexChanged;
+            _animSpeed.OnValueChanged += OnAnimStateChanged;
+            _animSprint.OnValueChanged += OnAnimStateChanged;
+            _animGrounded.OnValueChanged += OnAnimStateChanged;
             AttachCharacterVisual();
+            ApplyNetworkAnim();
 
             if (IsServer)
             {
@@ -124,13 +145,15 @@ namespace GraveRobbers.Player
                 SetLocalGearActive(false);
                 if (_controller != null)
                     _controller.enabled = false;
-                enabled = false;
             }
         }
 
         public override void OnNetworkDespawn()
         {
             _spawnIndex.OnValueChanged -= OnSpawnIndexChanged;
+            _animSpeed.OnValueChanged -= OnAnimStateChanged;
+            _animSprint.OnValueChanged -= OnAnimStateChanged;
+            _animGrounded.OnValueChanged -= OnAnimStateChanged;
 
             if (IsServer)
                 SpawnPoint.ServerRelease(OwnerClientId);
@@ -202,58 +225,69 @@ namespace GraveRobbers.Player
             visual.transform.localRotation = Quaternion.identity;
             visual.transform.localScale = Vector3.one;
 
-            GetComponent<PlayerWalkAnimation>()?.Bind(visual, index);
+            if (_walkAnimation == null)
+                _walkAnimation = GetComponent<PlayerWalkAnimation>();
+            _walkAnimation?.Bind(visual, index);
 
+            CacheVisual(visual.transform);
             if (IsOwner)
-                PlaceCameraAtEyes(visual.transform);
+                FollowEyes();
         }
 
-        void PlaceCameraAtEyes(Transform visual)
+        void CacheVisual(Transform visual)
         {
             _visual = visual;
-            _headBone = null;
+            _headBone = FindNamed(visual, "spine.006");
+            if (_headBone == null)
+                _headBone = FindHead(visual);
 
+            if (_headBone != null)
+                _restHeadForward = Vector3.Dot(_headBone.position - visual.position, FlatForward());
+        }
+
+        void LateUpdate()
+        {
+            KeepHeadBehindCamera();
+            if (IsOwner && _localReady)
+                FollowEyes();
+        }
+
+        void OnAnimStateChanged(float previous, float current) => ApplyNetworkAnim();
+
+        void OnAnimStateChanged(bool previous, bool current) => ApplyNetworkAnim();
+
+        void ApplyNetworkAnim()
+        {
+            if (_walkAnimation == null)
+                _walkAnimation = GetComponent<PlayerWalkAnimation>();
+            _walkAnimation?.SetLocomotion(_animSpeed.Value, _animSprint.Value, _animGrounded.Value);
+        }
+
+        void FollowEyes()
+        {
             if (cameraTransform == null)
                 return;
 
-            Transform head = FindNamed(visual, "spine.006");
-            if (head == null)
-                head = FindHead(visual);
-
-            if (head == null)
+            if (_headBone == null)
             {
                 cameraTransform.position = transform.position + Vector3.up * 1.65f;
                 return;
             }
 
-            _headBone = head;
-            Vector3 forward = FlatForward();
-            _restHeadForward = Vector3.Dot(head.position - visual.position, forward);
-
-            Transform crown = FindNamed(head, "spine.006_end");
-            Vector3 up = crown != null ? crown.position - head.position : transform.up;
+            Transform crown = FindNamed(_headBone, "spine.006_end");
+            Vector3 up = crown != null ? crown.position - _headBone.position : transform.up;
             if (up.sqrMagnitude < 0.0001f)
                 up = transform.up;
 
-            // Neck joint sits inside the skull. Eyes are partway to the crown
-            // and forward of the face, so the view is not inside the head.
-            Vector3 eyes = head.position + up.normalized * (up.magnitude * 0.28f);
-            cameraTransform.position = eyes + forward * 0.3f;
-        }
-
-        void LateUpdate()
-        {
-            if (!_localReady || !IsOwner)
-                return;
-
-            KeepHeadBehindCamera();
+            // Track the animated head so jump and lean move the view with the body.
+            Vector3 eyes = _headBone.position + up.normalized * (up.magnitude * 0.28f);
+            cameraTransform.position = eyes + FlatForward() * 0.3f;
         }
 
         void KeepHeadBehindCamera()
         {
-            // The camera stays on the player root. Mixamo's run clip leans the
-            // chest forward of that fixed view, so only the owner pulls the
-            // visual back by the same amount. Other clients still see the lean.
+            // Mixamo's run leans the chest forward of the root. Pull the visual
+            // back on every client so remotes see the same corrected pose.
             if (_visual == null || _headBone == null)
                 return;
 
@@ -261,7 +295,7 @@ namespace GraveRobbers.Player
             float posed = Vector3.Dot(_headBone.position - _visual.position, forward);
             float excess = posed - _restHeadForward;
             Vector3 local = _visual.localPosition;
-            bool hold = _sprinting || local.z < -0.001f;
+            bool hold = _animSprint.Value || _sprinting || local.z < -0.001f;
             float pull = 0f;
             if (hold && excess > 0.02f)
                 pull = excess + 0.06f * Mathf.Clamp01(excess / 0.1f);
@@ -472,7 +506,6 @@ namespace GraveRobbers.Player
             _controller.Move(move * (speed * Time.deltaTime));
             bool moving = move.sqrMagnitude > 0.01f;
             _sprinting = wantsSprint && moving;
-            GetComponent<PlayerWalkAnimation>()?.SetLocomotion(move.magnitude * speed, _sprinting);
 
             if (_jumpQueued && grounded)
                 _velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
@@ -480,6 +513,15 @@ namespace GraveRobbers.Player
             _jumpQueued = false;
             _velocity.y += gravity * Time.deltaTime;
             _controller.Move(_velocity * Time.deltaTime);
+
+            bool onGround = _controller.isGrounded && _velocity.y <= 0f;
+            float planarSpeed = move.magnitude * speed;
+            _animSpeed.Value = planarSpeed;
+            _animSprint.Value = _sprinting;
+            _animGrounded.Value = onGround;
+            if (_walkAnimation == null)
+                _walkAnimation = GetComponent<PlayerWalkAnimation>();
+            _walkAnimation?.SetLocomotion(planarSpeed, _sprinting, onGround);
         }
     }
 }

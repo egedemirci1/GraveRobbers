@@ -18,10 +18,12 @@ namespace GraveRobbers.Player
         const float SprintSpeedThreshold = 6f;
         const string SpeedParam = "Speed";
         const string SprintParam = "Sprint";
+        const string GroundedParam = "Grounded";
 
         [SerializeField] RuntimeAnimatorController controller;
         [SerializeField] RuntimeAnimatorController locomotionController;
         [SerializeField] Avatar[] avatars;
+        [SerializeField] GameObject poseSource;
 
         Animator _animator;
         Transform[] _bones;
@@ -31,6 +33,7 @@ namespace GraveRobbers.Player
         Vector3 _lastPosition;
         float _commandedSpeed = -1f;
         bool _commandedSprint;
+        bool _commandedGrounded = true;
         bool _ready;
         bool _primed;
         bool _walking;
@@ -114,25 +117,37 @@ namespace GraveRobbers.Player
 
         public void SetPlanarSpeed(float metersPerSecond)
         {
-            SetLocomotion(metersPerSecond, false);
+            SetLocomotion(metersPerSecond, false, true);
         }
 
         public void SetLocomotion(float metersPerSecond, bool sprint)
         {
+            SetLocomotion(metersPerSecond, sprint, true);
+        }
+
+        public void SetLocomotion(float metersPerSecond, bool sprint, bool grounded)
+        {
+            // Sticky until the next command. Network proxies only get updates when
+            // a NetworkVariable changes, so one-shot consume would drop to idle.
             _commandedSpeed = Mathf.Max(0f, metersPerSecond);
             _commandedSprint = sprint;
+            _commandedGrounded = grounded;
         }
 
         bool BindLocomotion(GameObject visual, int avatarIndex)
         {
-            // Use the avatar shipped with the model. A guessed T-pose does not match
-            // the pose Mixamo baked these clips against, so the arms end up overhead.
+            // Mixamo's own model already has the avatar these clips were baked against.
+            // The other character meshes share the Rigify names but not that pose, so
+            // build an avatar whose reference pose matches the Mixamo model.
             Avatar avatar = _animator.avatar;
             if (avatar == null || !avatar.isValid || !avatar.isHuman)
             {
                 if (avatars != null && avatarIndex >= 0 && avatarIndex < avatars.Length)
                     avatar = avatars[avatarIndex];
             }
+
+            if (avatar == null || !avatar.isValid || !avatar.isHuman)
+                avatar = BuildMatchedAvatar(visual);
 
             if (avatar != null)
                 _animator.avatar = avatar;
@@ -154,6 +169,9 @@ namespace GraveRobbers.Player
             _primed = false;
             _commandedSpeed = -1f;
             _commandedSprint = false;
+            _commandedGrounded = true;
+            if (_animator != null)
+                _animator.SetBool(GroundedParam, true);
             _ready = avatar != null && avatar.isValid && avatar.isHuman;
             if (!_ready)
             {
@@ -177,12 +195,12 @@ namespace GraveRobbers.Player
 
             float speed;
             bool sprint;
+            bool grounded = _commandedGrounded;
             if (_commandedSpeed >= 0f)
             {
                 speed = _commandedSpeed;
                 sprint = _commandedSprint;
-                _commandedSpeed = -1f;
-                _commandedSprint = false;
+                grounded = _commandedGrounded;
                 _lastPosition = transform.position;
             }
             else
@@ -199,7 +217,7 @@ namespace GraveRobbers.Player
 
             if (_mixamo)
             {
-                PlayMixamo(speed, sprint);
+                PlayMixamo(speed, sprint, grounded);
                 return;
             }
 
@@ -223,12 +241,13 @@ namespace GraveRobbers.Player
             _animator.speed = Mathf.Clamp(speed / NaturalWalkSpeed, 0.8f, MaxPlayback);
         }
 
-        void PlayMixamo(float speed, bool sprint)
+        void PlayMixamo(float speed, bool sprint, bool grounded)
         {
             bool running = sprint && speed > StopSpeed;
             _animator.SetFloat(SpeedParam, speed);
             _animator.SetBool(SprintParam, running);
-            if (!running && speed <= StopSpeed)
+            _animator.SetBool(GroundedParam, grounded);
+            if (!grounded || (!running && speed <= StopSpeed))
                 _animator.speed = 1f;
             else if (running)
                 _animator.speed = Mathf.Clamp(speed / 4.5f, 0.85f, 1.4f);
@@ -274,9 +293,73 @@ namespace GraveRobbers.Player
             "hand.R", "RightHand"
         };
 
-        static Avatar BuildAvatar(GameObject visual)
+        Avatar BuildMatchedAvatar(GameObject visual)
         {
-            ApplyTPose(visual.transform);
+            if (poseSource == null)
+                return null;
+
+            GameObject source = Instantiate(poseSource);
+            source.SetActive(false);
+            try
+            {
+                MatchPose(visual.transform, source.transform);
+                return BuildAvatar(visual, applyTPose: false);
+            }
+            finally
+            {
+                Destroy(source);
+            }
+        }
+
+        static void MatchPose(Transform targetRoot, Transform sourceRoot)
+        {
+            string[][] chains =
+            {
+                new[] { "spine", "spine.001", "spine.002", "spine.003", "spine.004", "spine.005", "spine.006" },
+                new[] { "shoulder.L", "upper_arm.L", "forearm.L", "hand.L", "hand.L_end" },
+                new[] { "shoulder.R", "upper_arm.R", "forearm.R", "hand.R", "hand.R_end" },
+                new[] { "thigh.L", "shin.L", "foot.L", "toe.L", "toe.L_end" },
+                new[] { "thigh.R", "shin.R", "foot.R", "toe.R", "toe.R_end" }
+            };
+
+            for (int c = 0; c < chains.Length; c++)
+            {
+                string[] chain = chains[c];
+                for (int i = 0; i < chain.Length - 1; i++)
+                    MatchBone(targetRoot, sourceRoot, chain[i], chain[i + 1]);
+            }
+        }
+
+        static void MatchBone(Transform targetRoot, Transform sourceRoot, string boneName, string childName)
+        {
+            Transform sourceBone = FindNamed(sourceRoot, boneName);
+            Transform sourceChild = FindNamed(sourceRoot, childName);
+            Transform targetBone = FindNamed(targetRoot, boneName);
+            Transform targetChild = FindNamed(targetRoot, childName);
+            if (sourceBone == null || sourceChild == null || targetBone == null || targetChild == null)
+                return;
+
+            Vector3 axis = sourceChild.position - sourceBone.position;
+            if (axis.sqrMagnitude < 0.000001f)
+                return;
+
+            Vector3 secondary = sourceBone.forward;
+            if (Mathf.Abs(Vector3.Dot(secondary.normalized, axis.normalized)) > 0.9f)
+                secondary = sourceBone.right;
+
+            Vector3 axisLocal = sourceRoot.InverseTransformDirection(axis);
+            Vector3 secondaryLocal = sourceRoot.InverseTransformDirection(secondary);
+            PointBone(
+                targetBone,
+                targetChild,
+                targetRoot.TransformDirection(axisLocal),
+                targetRoot.TransformDirection(secondaryLocal));
+        }
+
+        static Avatar BuildAvatar(GameObject visual, bool applyTPose = true)
+        {
+            if (applyTPose)
+                ApplyTPose(visual.transform);
             var description = new HumanDescription
             {
                 human = BuildHumanBones(visual.transform),

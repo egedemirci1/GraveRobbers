@@ -17,6 +17,7 @@ namespace GraveRobbers.Editor
         const string IdlePath = "Assets/Idle.fbx";
         const string WalkPath = "Assets/Walking.fbx";
         const string RunPath = "Assets/Running.fbx";
+        const string JumpPath = "Assets/Jumping.fbx";
         const string ControllerPath = "Assets/Resources/PlayerLocomotion.controller";
         const string PlayerPath = "Assets/_Project/Prefabs/Player.prefab";
         const string FlagName = "grave_robbers_mixamo_locomotion.flag";
@@ -38,9 +39,9 @@ namespace GraveRobbers.Editor
                 return;
             }
 
-            if (!File.Exists(IdlePath) || !File.Exists(WalkPath) || !File.Exists(RunPath))
+            if (!File.Exists(IdlePath) || !File.Exists(WalkPath) || !File.Exists(RunPath) || !File.Exists(JumpPath))
             {
-                Debug.LogError("Need Assets/Idle.fbx, Assets/Walking.fbx, and Assets/Running.fbx.");
+                Debug.LogError("Need Assets/Idle.fbx, Assets/Walking.fbx, Assets/Running.fbx, and Assets/Jumping.fbx.");
                 return;
             }
 
@@ -59,22 +60,27 @@ namespace GraveRobbers.Editor
                 return;
             }
 
-            // Walk and run were given avatars from their own first frame, so the
+            // Motion clips were given avatars from their own first frame, so the
             // muscle axes do not match Idle. Rebuild those avatars on Idle's pose.
-            ConfigureClipToIdlePose(WalkPath);
-            ConfigureClipToIdlePose(RunPath);
+            ConfigureClipToIdlePose(WalkPath, loop: true, bakeHeight: true);
+            ConfigureClipToIdlePose(RunPath, loop: true, bakeHeight: true);
+            // Jump's vertical travel stays root motion. The capsule already moves the
+            // body, so baking that height into the pose lifts the mesh and drops it
+            // again around the middle of the clip.
+            ConfigureClipToIdlePose(JumpPath, loop: false, bakeHeight: false);
             AnimationClip walk = FindClip(WalkPath);
             AnimationClip run = FindClip(RunPath);
-            if (walk == null || run == null)
+            AnimationClip jump = FindClip(JumpPath);
+            if (walk == null || run == null || jump == null)
             {
-                Debug.LogError("Walking.fbx or Running.fbx has no animation clip.");
+                Debug.LogError("Walking.fbx, Running.fbx, or Jumping.fbx has no animation clip.");
                 return;
             }
 
-            RuntimeAnimatorController controller = CreateController(idle, walk, run);
+            RuntimeAnimatorController controller = CreateController(idle, walk, run, jump);
             AssignPlayer(controller);
             AssetDatabase.SaveAssets();
-            Debug.Log("Idle, Walk, and Run play on the character's own model.");
+            Debug.Log("Idle, Walk, Run, and Jump play on the character's own model.");
         }
 
         static void RunIfRequested()
@@ -171,7 +177,7 @@ namespace GraveRobbers.Editor
             return null;
         }
 
-        static void ConfigureClipToIdlePose(string path)
+        static void ConfigureClipToIdlePose(string path, bool loop, bool bakeHeight)
         {
             Dictionary<string, SkeletonBone> idlePose = IdlePose();
             var importer = (ModelImporter)AssetImporter.GetAtPath(path);
@@ -210,7 +216,7 @@ namespace GraveRobbers.Editor
             importer.autoGenerateAvatarMappingIfUnspecified = false;
             importer.preserveHierarchy = true;
             importer.importAnimation = true;
-            ApplyClipSettings(importer);
+            ApplyClipSettings(importer, loop, bakeHeight);
             importer.SaveAndReimport();
         }
 
@@ -293,7 +299,7 @@ namespace GraveRobbers.Editor
             return bones.ToArray();
         }
 
-        static void ApplyClipSettings(ModelImporter importer)
+        static void ApplyClipSettings(ModelImporter importer, bool loop = true, bool bakeHeight = true)
         {
             ModelImporterClipAnimation[] clips = importer.defaultClipAnimations;
             if (clips == null)
@@ -301,10 +307,10 @@ namespace GraveRobbers.Editor
 
             for (int i = 0; i < clips.Length; i++)
             {
-                clips[i].loopTime = true;
-                clips[i].loopPose = true;
+                clips[i].loopTime = loop;
+                clips[i].loopPose = loop;
                 clips[i].lockRootRotation = true;
-                clips[i].lockRootHeightY = true;
+                clips[i].lockRootHeightY = bakeHeight;
                 clips[i].lockRootPositionXZ = true;
                 clips[i].keepOriginalOrientation = true;
                 clips[i].keepOriginalPositionY = true;
@@ -314,7 +320,11 @@ namespace GraveRobbers.Editor
             importer.clipAnimations = clips;
         }
 
-        static RuntimeAnimatorController CreateController(AnimationClip idle, AnimationClip walk, AnimationClip run)
+        static RuntimeAnimatorController CreateController(
+            AnimationClip idle,
+            AnimationClip walk,
+            AnimationClip run,
+            AnimationClip jump)
         {
             if (AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath) != null)
                 AssetDatabase.DeleteAsset(ControllerPath);
@@ -322,15 +332,36 @@ namespace GraveRobbers.Editor
             var controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
             controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
             controller.AddParameter("Sprint", AnimatorControllerParameterType.Bool);
+            controller.AddParameter("Grounded", AnimatorControllerParameterType.Bool);
 
             AnimatorStateMachine machine = controller.layers[0].stateMachine;
             AnimatorState idleState = machine.AddState("Idle", new Vector3(300f, 0f, 0f));
             AnimatorState walkState = machine.AddState("Walk", new Vector3(300f, 70f, 0f));
             AnimatorState runState = machine.AddState("Run", new Vector3(300f, 140f, 0f));
+            AnimatorState jumpState = machine.AddState("Jump", new Vector3(520f, 70f, 0f));
             idleState.motion = idle;
             walkState.motion = walk;
             runState.motion = run;
+            jumpState.motion = jump;
+            // Physics air time is shorter than the Mixamo clip. Play the whole
+            // in-place jump across that air time so it does not cut off mid-pose.
+            const float jumpHeight = 1.2f;
+            const float gravity = 20f;
+            float airTime = 2f * Mathf.Sqrt(2f * jumpHeight / gravity);
+            if (jump.length > 0.2f && airTime > 0.05f)
+                jumpState.speed = jump.length / airTime;
             machine.defaultState = idleState;
+
+            AnimatorControllerParameter[] parameters = controller.parameters;
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                if (parameters[i].name != "Grounded")
+                    continue;
+
+                parameters[i].defaultBool = true;
+                controller.parameters = parameters;
+                break;
+            }
 
             Link(idleState, runState, Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"), Condition(AnimatorConditionMode.If, 0f, "Sprint"));
             Link(idleState, walkState, Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"), Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"));
@@ -338,6 +369,17 @@ namespace GraveRobbers.Editor
             Link(walkState, idleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
             Link(runState, walkState, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.2f, "Speed"));
             Link(runState, idleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+
+            AnimatorStateTransition intoJump = machine.AddAnyStateTransition(jumpState);
+            intoJump.hasExitTime = false;
+            intoJump.hasFixedDuration = true;
+            intoJump.duration = 0.08f;
+            intoJump.canTransitionToSelf = false;
+            intoJump.AddCondition(AnimatorConditionMode.IfNot, 0f, "Grounded");
+
+            Link(jumpState, runState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(jumpState, walkState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(jumpState, idleState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), Condition(AnimatorConditionMode.Less, 0.4f, "Speed"));
             return controller;
         }
 
@@ -377,10 +419,27 @@ namespace GraveRobbers.Editor
             var body = player.GetComponent<PlayerController>();
             var bodySo = new SerializedObject(body);
             SerializedProperty characters = bodySo.FindProperty("characterPrefabs");
-            GameObject male = AssetDatabase.LoadAssetAtPath<GameObject>(IdlePath);
-            if (characters != null && characters.arraySize > 0 && male != null)
-                characters.GetArrayElementAtIndex(0).objectReferenceValue = male;
+            GameObject[] bodies =
+            {
+                AssetDatabase.LoadAssetAtPath<GameObject>(IdlePath),
+                AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Floreswa/Prefabs/male02_1.prefab"),
+                AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Floreswa/Prefabs/male03_1.prefab"),
+                AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Floreswa/Prefabs/male01_2.prefab")
+            };
+            if (characters != null)
+            {
+                characters.arraySize = bodies.Length;
+                for (int i = 0; i < bodies.Length; i++)
+                    characters.GetArrayElementAtIndex(i).objectReferenceValue = bodies[i];
+            }
             bodySo.ApplyModifiedPropertiesWithoutUndo();
+
+            if (walk != null)
+            {
+                var pose = new SerializedObject(walk);
+                pose.FindProperty("poseSource").objectReferenceValue = bodies[0];
+                pose.ApplyModifiedPropertiesWithoutUndo();
+            }
 
             PrefabUtility.SaveAsPrefabAsset(player, PlayerPath);
             PrefabUtility.UnloadPrefabContents(player);
