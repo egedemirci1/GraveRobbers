@@ -59,6 +59,10 @@ namespace GraveRobbers.Player
         bool _jumpQueued;
         bool _localReady;
         bool _wantCursorLock = true;
+        bool _sprinting;
+        Transform _visual;
+        Transform _headBone;
+        float _restHeadForward;
 
         public float SpeedMultiplier { get; set; } = 1f;
 
@@ -206,6 +210,9 @@ namespace GraveRobbers.Player
 
         void PlaceCameraAtEyes(Transform visual)
         {
+            _visual = visual;
+            _headBone = null;
+
             if (cameraTransform == null)
                 return;
 
@@ -219,6 +226,10 @@ namespace GraveRobbers.Player
                 return;
             }
 
+            _headBone = head;
+            Vector3 forward = FlatForward();
+            _restHeadForward = Vector3.Dot(head.position - visual.position, forward);
+
             Transform crown = FindNamed(head, "spine.006_end");
             Vector3 up = crown != null ? crown.position - head.position : transform.up;
             if (up.sqrMagnitude < 0.0001f)
@@ -227,10 +238,46 @@ namespace GraveRobbers.Player
             // Neck joint sits inside the skull. Eyes are partway to the crown
             // and forward of the face, so the view is not inside the head.
             Vector3 eyes = head.position + up.normalized * (up.magnitude * 0.28f);
-            Vector3 face = Vector3.ProjectOnPlane(transform.forward, transform.up);
-            if (face.sqrMagnitude < 0.0001f)
-                face = transform.forward;
-            cameraTransform.position = eyes + face.normalized * 0.3f;
+            cameraTransform.position = eyes + forward * 0.3f;
+        }
+
+        void LateUpdate()
+        {
+            if (!_localReady || !IsOwner)
+                return;
+
+            KeepHeadBehindCamera();
+        }
+
+        void KeepHeadBehindCamera()
+        {
+            // The camera stays on the player root. Mixamo's run clip leans the
+            // chest forward of that fixed view, so only the owner pulls the
+            // visual back by the same amount. Other clients still see the lean.
+            if (_visual == null || _headBone == null)
+                return;
+
+            Vector3 forward = FlatForward();
+            float posed = Vector3.Dot(_headBone.position - _visual.position, forward);
+            float excess = posed - _restHeadForward;
+            Vector3 local = _visual.localPosition;
+            bool hold = _sprinting || local.z < -0.001f;
+            float pull = 0f;
+            if (hold && excess > 0.02f)
+                pull = excess + 0.06f * Mathf.Clamp01(excess / 0.1f);
+
+            local.x = 0f;
+            local.y = 0f;
+            local.z = -pull;
+            _visual.localPosition = local;
+        }
+
+        Vector3 FlatForward()
+        {
+            Vector3 forward = Vector3.ProjectOnPlane(transform.forward, transform.up);
+            if (forward.sqrMagnitude < 0.0001f)
+                forward = transform.forward;
+            return forward.normalized;
         }
 
         static Transform FindNamed(Transform root, string name)
@@ -424,7 +471,8 @@ namespace GraveRobbers.Player
             float speed = (wantsSprint ? sprintSpeed : walkSpeed) * SpeedMultiplier;
             _controller.Move(move * (speed * Time.deltaTime));
             bool moving = move.sqrMagnitude > 0.01f;
-            GetComponent<PlayerWalkAnimation>()?.SetLocomotion(move.magnitude * speed, wantsSprint && moving);
+            _sprinting = wantsSprint && moving;
+            GetComponent<PlayerWalkAnimation>()?.SetLocomotion(move.magnitude * speed, _sprinting);
 
             if (_jumpQueued && grounded)
                 _velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
