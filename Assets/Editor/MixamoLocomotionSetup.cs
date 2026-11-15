@@ -16,7 +16,7 @@ namespace GraveRobbers.Editor
     {
         const string IdlePath = "Assets/Idle.fbx";
         const string WalkPath = "Assets/Walking.fbx";
-        const string RunPath = "Assets/Running.fbx";
+        const string RunPath = "Assets/Fast Run (1).fbx";
         const string JumpPath = "Assets/Jumping.fbx";
         const string ControllerPath = "Assets/Resources/PlayerLocomotion.controller";
         const string PlayerPath = "Assets/_Project/Prefabs/Player.prefab";
@@ -41,7 +41,7 @@ namespace GraveRobbers.Editor
 
             if (!File.Exists(IdlePath) || !File.Exists(WalkPath) || !File.Exists(RunPath) || !File.Exists(JumpPath))
             {
-                Debug.LogError("Need Assets/Idle.fbx, Assets/Walking.fbx, Assets/Running.fbx, and Assets/Jumping.fbx.");
+                Debug.LogError("Need Assets/Idle.fbx, Assets/Walking.fbx, Assets/Fast Run (1).fbx, and Assets/Jumping.fbx.");
                 return;
             }
 
@@ -73,7 +73,7 @@ namespace GraveRobbers.Editor
             AnimationClip jump = FindClip(JumpPath);
             if (walk == null || run == null || jump == null)
             {
-                Debug.LogError("Walking.fbx, Running.fbx, or Jumping.fbx has no animation clip.");
+                Debug.LogError("Walking.fbx, Fast Run (1).fbx, or Jumping.fbx has no animation clip.");
                 return;
             }
 
