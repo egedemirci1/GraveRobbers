@@ -38,6 +38,8 @@ namespace GraveRobbers.Player
         bool _primed;
         bool _walking;
         bool _mixamo;
+        bool _inAir;
+        float _airTime;
 
         public bool Bind(GameObject visual, int avatarIndex)
         {
@@ -67,7 +69,7 @@ namespace GraveRobbers.Player
                 locomotionController = Resources.Load<RuntimeAnimatorController>("PlayerLocomotion");
 
             if (locomotionController != null)
-                return BindLocomotion(visual, avatarIndex);
+                return BindLocomotion(visual);
 
             _animator.enabled = false;
             if (controller == null)
@@ -134,19 +136,15 @@ namespace GraveRobbers.Player
             _commandedGrounded = grounded;
         }
 
-        bool BindLocomotion(GameObject visual, int avatarIndex)
+        bool BindLocomotion(GameObject visual)
         {
-            // Mixamo's own model already has the avatar these clips were baked against.
-            // The other character meshes share the Rigify names but not that pose, so
-            // build an avatar whose reference pose matches the Mixamo model.
+            // The locomotion clips were baked against the Mixamo model's avatar.
+            // A Floreswa humanoid avatar is valid but its muscle zero is a T-pose,
+            // so the idle clip (near zero) leaves that character stuck in a T-pose.
+            Avatar sourceAvatar = PoseSourceAvatar();
             Avatar avatar = _animator.avatar;
-            if (avatar == null || !avatar.isValid || !avatar.isHuman)
-            {
-                if (avatars != null && avatarIndex >= 0 && avatarIndex < avatars.Length)
-                    avatar = avatars[avatarIndex];
-            }
-
-            if (avatar == null || !avatar.isValid || !avatar.isHuman)
+            bool clipAvatar = sourceAvatar != null && avatar == sourceAvatar && avatar.isValid && avatar.isHuman;
+            if (!clipAvatar)
                 avatar = BuildMatchedAvatar(visual);
 
             if (avatar != null)
@@ -156,6 +154,7 @@ namespace GraveRobbers.Player
             _animator.applyRootMotion = false;
             _animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
             _animator.updateMode = AnimatorUpdateMode.Normal;
+            _animator.SetBool(GroundedParam, true);
             _animator.enabled = true;
             _animator.Rebind();
             _animator.Update(0f);
@@ -247,12 +246,44 @@ namespace GraveRobbers.Player
             _animator.SetFloat(SpeedParam, speed);
             _animator.SetBool(SprintParam, running);
             _animator.SetBool(GroundedParam, grounded);
-            if (!grounded || (!running && speed <= StopSpeed))
+
+            if (!grounded)
+            {
+                // The clip also contains the crouch and the landing. Playing all of
+                // that during the short hop, sped up, is what made the jump look wrong.
+                // Start in the airborne pose and hold it until the capsule lands.
+                if (!_inAir)
+                {
+                    _animator.Play("Jump", 0, 0.34f);
+                    _inAir = true;
+                    _airTime = 0f;
+                }
+
+                _airTime += Time.deltaTime;
+                AnimatorStateInfo info = _animator.GetCurrentAnimatorStateInfo(0);
+                _animator.speed = info.IsName("Jump") && (info.normalizedTime >= 0.46f || _airTime > 0.22f) ? 0f : 1f;
+                return;
+            }
+
+            _inAir = false;
+            _airTime = 0f;
+            if (!running && speed <= StopSpeed)
                 _animator.speed = 1f;
             else if (running)
                 _animator.speed = Mathf.Clamp(speed / 4.5f, 0.85f, 1.4f);
             else
                 _animator.speed = Mathf.Clamp(speed / NaturalWalkSpeed, 0.85f, 1.7f);
+        }
+
+        Avatar PoseSourceAvatar()
+        {
+            if (poseSource == null)
+                return null;
+
+            Animator animator = poseSource.GetComponent<Animator>();
+            if (animator == null)
+                animator = poseSource.GetComponentInChildren<Animator>(true);
+            return animator != null ? animator.avatar : null;
         }
 
         void StopWalk()

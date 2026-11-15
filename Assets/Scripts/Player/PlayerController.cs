@@ -79,6 +79,10 @@ namespace GraveRobbers.Player
         Transform _visual;
         Transform _headBone;
         float _restHeadForward;
+        float _restHeadUp;
+        Vector3 _eyeLocal;
+        bool _eyeReady;
+        CapsuleCollider _blocker;
 
         public float SpeedMultiplier { get; set; } = 1f;
 
@@ -104,6 +108,8 @@ namespace GraveRobbers.Player
 
             if (GetComponent<NetworkObject>() != null)
                 SetLocalGearActive(false);
+
+            EnsureBodyBlocker();
         }
 
         public override void OnNetworkSpawn()
@@ -242,7 +248,11 @@ namespace GraveRobbers.Player
                 _headBone = FindHead(visual);
 
             if (_headBone != null)
-                _restHeadForward = Vector3.Dot(_headBone.position - visual.position, FlatForward());
+            {
+                Vector3 head = _headBone.position - visual.position;
+                _restHeadForward = Vector3.Dot(head, FlatForward());
+                _restHeadUp = Vector3.Dot(head, transform.up);
+            }
         }
 
         void LateUpdate()
@@ -270,7 +280,7 @@ namespace GraveRobbers.Player
 
             if (_headBone == null)
             {
-                cameraTransform.position = transform.position + Vector3.up * 1.65f;
+                cameraTransform.localPosition = new Vector3(0f, 1.65f, 0.3f);
                 return;
             }
 
@@ -279,9 +289,54 @@ namespace GraveRobbers.Player
             if (up.sqrMagnitude < 0.0001f)
                 up = transform.up;
 
-            // Track the animated head so jump and lean move the view with the body.
             Vector3 eyes = _headBone.position + up.normalized * (up.magnitude * 0.28f);
-            cameraTransform.position = eyes + FlatForward() * 0.3f;
+            Vector3 local = transform.InverseTransformPoint(eyes + FlatForward() * 0.3f);
+            bool grounded = _animGrounded.Value;
+
+            if (!_eyeReady)
+            {
+                _eyeLocal = local;
+                _eyeReady = grounded;
+            }
+            else if (grounded)
+            {
+                // Keep the idle eye height. The jump clip swings the head and was
+                // dragging the whole view with it.
+                local.y = _eyeLocal.y;
+                float follow = 1f - Mathf.Exp(-10f * Time.deltaTime);
+                _eyeLocal.x = Mathf.Lerp(_eyeLocal.x, local.x, follow);
+                _eyeLocal.z = Mathf.Lerp(_eyeLocal.z, local.z, follow);
+            }
+
+            cameraTransform.localPosition = _eyeLocal;
+        }
+
+        void EnsureBodyBlocker()
+        {
+            // CharacterControllers do not collide with each other. A kinematic
+            // capsule on each body is what the other players' controllers hit.
+            Transform existing = transform.Find("PlayerBlocker");
+            GameObject blocker = existing != null ? existing.gameObject : new GameObject("PlayerBlocker");
+            if (existing == null)
+                blocker.transform.SetParent(transform, false);
+
+            _blocker = blocker.GetComponent<CapsuleCollider>();
+            if (_blocker == null)
+                _blocker = blocker.AddComponent<CapsuleCollider>();
+
+            _blocker.height = _controller.height;
+            _blocker.radius = _controller.radius;
+            _blocker.center = _controller.center;
+            _blocker.isTrigger = false;
+
+            Rigidbody body = blocker.GetComponent<Rigidbody>();
+            if (body == null)
+                body = blocker.AddComponent<Rigidbody>();
+            body.isKinematic = true;
+            body.useGravity = false;
+            body.interpolation = RigidbodyInterpolation.None;
+
+            Physics.IgnoreCollision(_controller, _blocker, true);
         }
 
         void KeepHeadBehindCamera()
@@ -292,16 +347,21 @@ namespace GraveRobbers.Player
                 return;
 
             Vector3 forward = FlatForward();
-            float posed = Vector3.Dot(_headBone.position - _visual.position, forward);
-            float excess = posed - _restHeadForward;
+            Vector3 head = _headBone.position - _visual.position;
+            float excess = Vector3.Dot(head, forward) - _restHeadForward;
+            float rise = Vector3.Dot(head, transform.up) - _restHeadUp;
             Vector3 local = _visual.localPosition;
-            bool hold = _animSprint.Value || _sprinting || local.z < -0.001f;
+            bool airborne = !_animGrounded.Value;
+            // The jump pose drops and pushes the head. The camera stays at the idle
+            // eyes, so looking down then looks straight at that head.
+            bool hold = _animSprint.Value || _sprinting || airborne || local.z < -0.001f;
             float pull = 0f;
             if (hold && excess > 0.02f)
                 pull = excess + 0.06f * Mathf.Clamp01(excess / 0.1f);
 
+            bool holdHeight = airborne || Mathf.Abs(local.y) > 0.001f;
             local.x = 0f;
-            local.y = 0f;
+            local.y = holdHeight ? -rise : 0f;
             local.z = -pull;
             _visual.localPosition = local;
         }

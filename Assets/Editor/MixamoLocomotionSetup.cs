@@ -343,13 +343,9 @@ namespace GraveRobbers.Editor
             walkState.motion = walk;
             runState.motion = run;
             jumpState.motion = jump;
-            // Physics air time is shorter than the Mixamo clip. Play the whole
-            // in-place jump across that air time so it does not cut off mid-pose.
-            const float jumpHeight = 1.2f;
-            const float gravity = 20f;
-            float airTime = 2f * Mathf.Sqrt(2f * jumpHeight / gravity);
-            if (jump.length > 0.2f && airTime > 0.05f)
-                jumpState.speed = jump.length / airTime;
+            // The capsule already arcs through the air. Sped-up playback of the
+            // whole clip (crouch, flight, and landing) fights that arc.
+            jumpState.speed = 1f;
             machine.defaultState = idleState;
 
             AnimatorControllerParameter[] parameters = controller.parameters;
@@ -374,6 +370,7 @@ namespace GraveRobbers.Editor
             intoJump.hasExitTime = false;
             intoJump.hasFixedDuration = true;
             intoJump.duration = 0.08f;
+            intoJump.offset = 0.34f;
             intoJump.canTransitionToSelf = false;
             intoJump.AddCondition(AnimatorConditionMode.IfNot, 0f, "Grounded");
 
