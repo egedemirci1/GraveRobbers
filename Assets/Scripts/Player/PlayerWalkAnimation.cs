@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Reflection;
+using GraveRobbers.Interaction;
 using UnityEngine;
 
 namespace GraveRobbers.Player
@@ -19,6 +20,7 @@ namespace GraveRobbers.Player
         const string SpeedParam = "Speed";
         const string SprintParam = "Sprint";
         const string GroundedParam = "Grounded";
+        const string CarryParam = "Carry";
 
         [SerializeField] RuntimeAnimatorController controller;
         [SerializeField] RuntimeAnimatorController locomotionController;
@@ -26,6 +28,7 @@ namespace GraveRobbers.Player
         [SerializeField] GameObject poseSource;
 
         Animator _animator;
+        PickupSystem _pickup;
         Transform[] _bones;
         Vector3[] _localPositions;
         Quaternion[] _localRotations;
@@ -242,10 +245,14 @@ namespace GraveRobbers.Player
 
         void PlayMixamo(float speed, bool sprint, bool grounded)
         {
+            if (_pickup == null)
+                _pickup = GetComponent<PickupSystem>();
+
             bool running = sprint && speed > StopSpeed;
             _animator.SetFloat(SpeedParam, speed);
             _animator.SetBool(SprintParam, running);
             _animator.SetBool(GroundedParam, grounded);
+            _animator.SetBool(CarryParam, _pickup != null && _pickup.IsHolding);
 
             if (!grounded)
             {

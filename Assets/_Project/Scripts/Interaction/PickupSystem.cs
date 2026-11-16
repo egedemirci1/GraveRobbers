@@ -9,6 +9,7 @@ namespace GraveRobbers.Interaction
     /// <summary>
     /// Per-player carry. Server validates; only this player's held loot drops on disconnect.
     /// </summary>
+    [DefaultExecutionOrder(1000)]
     public class PickupSystem : NetworkBehaviour
     {
         [Header("References")]
@@ -100,6 +101,18 @@ namespace GraveRobbers.Interaction
             {
                 playerController.SpeedMultiplier = 1f;
             }
+        }
+
+        void LateUpdate()
+        {
+            if (!IsSpawned || !IsHolding)
+                return;
+
+            if (!_heldLootRef.Value.TryGet(out NetworkObject held) ||
+                !held.TryGetComponent(out LootItem loot))
+                return;
+
+            CarryGrip.Apply(transform, loot);
         }
 
         void Update()

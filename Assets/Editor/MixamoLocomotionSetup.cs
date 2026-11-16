@@ -18,6 +18,9 @@ namespace GraveRobbers.Editor
         const string WalkPath = "Assets/Walking.fbx";
         const string RunPath = "Assets/Fast Run (1).fbx";
         const string JumpPath = "Assets/Jumping.fbx";
+        const string CarryIdlePath = "Assets/Carrying-idle.fbx";
+        const string CarryWalkPath = "Assets/carrying-Walking.fbx";
+        const string CarryRunPath = "Assets/Carrying-Running.fbx";
         const string ControllerPath = "Assets/Resources/PlayerLocomotion.controller";
         const string PlayerPath = "Assets/_Project/Prefabs/Player.prefab";
         const string FlagName = "grave_robbers_mixamo_locomotion.flag";
@@ -39,9 +42,10 @@ namespace GraveRobbers.Editor
                 return;
             }
 
-            if (!File.Exists(IdlePath) || !File.Exists(WalkPath) || !File.Exists(RunPath) || !File.Exists(JumpPath))
+            if (!File.Exists(IdlePath) || !File.Exists(WalkPath) || !File.Exists(RunPath) || !File.Exists(JumpPath)
+                || !File.Exists(CarryIdlePath) || !File.Exists(CarryWalkPath) || !File.Exists(CarryRunPath))
             {
-                Debug.LogError("Need Assets/Idle.fbx, Assets/Walking.fbx, Assets/Fast Run (1).fbx, and Assets/Jumping.fbx.");
+                Debug.LogError("Need the locomotion clips and the three carrying clips.");
                 return;
             }
 
@@ -68,19 +72,25 @@ namespace GraveRobbers.Editor
             // body, so baking that height into the pose lifts the mesh and drops it
             // again around the middle of the clip.
             ConfigureClipToIdlePose(JumpPath, loop: false, bakeHeight: false);
+            ConfigureClipToIdlePose(CarryIdlePath, loop: true, bakeHeight: true);
+            ConfigureClipToIdlePose(CarryWalkPath, loop: true, bakeHeight: true);
+            ConfigureClipToIdlePose(CarryRunPath, loop: true, bakeHeight: true);
             AnimationClip walk = FindClip(WalkPath);
             AnimationClip run = FindClip(RunPath);
             AnimationClip jump = FindClip(JumpPath);
-            if (walk == null || run == null || jump == null)
+            AnimationClip carryIdle = FindClip(CarryIdlePath);
+            AnimationClip carryWalk = FindClip(CarryWalkPath);
+            AnimationClip carryRun = FindClip(CarryRunPath);
+            if (walk == null || run == null || jump == null || carryIdle == null || carryWalk == null || carryRun == null)
             {
-                Debug.LogError("Walking.fbx, Fast Run (1).fbx, or Jumping.fbx has no animation clip.");
+                Debug.LogError("A locomotion or carrying clip has no animation.");
                 return;
             }
 
-            RuntimeAnimatorController controller = CreateController(idle, walk, run, jump);
+            RuntimeAnimatorController controller = CreateController(idle, walk, run, jump, carryIdle, carryWalk, carryRun);
             AssignPlayer(controller);
             AssetDatabase.SaveAssets();
-            Debug.Log("Idle, Walk, Run, and Jump play on the character's own model.");
+            Debug.Log("Idle, Walk, Run, Jump, and carrying clips play on the character's own model.");
         }
 
         static void RunIfRequested()
@@ -324,7 +334,10 @@ namespace GraveRobbers.Editor
             AnimationClip idle,
             AnimationClip walk,
             AnimationClip run,
-            AnimationClip jump)
+            AnimationClip jump,
+            AnimationClip carryIdle,
+            AnimationClip carryWalk,
+            AnimationClip carryRun)
         {
             if (AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath) != null)
                 AssetDatabase.DeleteAsset(ControllerPath);
@@ -333,16 +346,23 @@ namespace GraveRobbers.Editor
             controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
             controller.AddParameter("Sprint", AnimatorControllerParameterType.Bool);
             controller.AddParameter("Grounded", AnimatorControllerParameterType.Bool);
+            controller.AddParameter("Carry", AnimatorControllerParameterType.Bool);
 
             AnimatorStateMachine machine = controller.layers[0].stateMachine;
             AnimatorState idleState = machine.AddState("Idle", new Vector3(300f, 0f, 0f));
             AnimatorState walkState = machine.AddState("Walk", new Vector3(300f, 70f, 0f));
             AnimatorState runState = machine.AddState("Run", new Vector3(300f, 140f, 0f));
-            AnimatorState jumpState = machine.AddState("Jump", new Vector3(520f, 70f, 0f));
+            AnimatorState jumpState = machine.AddState("Jump", new Vector3(80f, 70f, 0f));
+            AnimatorState carryIdleState = machine.AddState("CarryIdle", new Vector3(560f, 0f, 0f));
+            AnimatorState carryWalkState = machine.AddState("CarryWalk", new Vector3(560f, 70f, 0f));
+            AnimatorState carryRunState = machine.AddState("CarryRun", new Vector3(560f, 140f, 0f));
             idleState.motion = idle;
             walkState.motion = walk;
             runState.motion = run;
             jumpState.motion = jump;
+            carryIdleState.motion = carryIdle;
+            carryWalkState.motion = carryWalk;
+            carryRunState.motion = carryRun;
             // The capsule already arcs through the air. Sped-up playback of the
             // whole clip (crouch, flight, and landing) fights that arc.
             jumpState.speed = 1f;
@@ -359,12 +379,36 @@ namespace GraveRobbers.Editor
                 break;
             }
 
-            Link(idleState, runState, Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"), Condition(AnimatorConditionMode.If, 0f, "Sprint"));
-            Link(idleState, walkState, Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"), Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"));
-            Link(walkState, runState, Condition(AnimatorConditionMode.If, 0f, "Sprint"));
-            Link(walkState, idleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
-            Link(runState, walkState, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.2f, "Speed"));
-            Link(runState, idleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+            AnimatorCondition handsFree = Condition(AnimatorConditionMode.IfNot, 0f, "Carry");
+            AnimatorCondition carrying = Condition(AnimatorConditionMode.If, 0f, "Carry");
+            Link(idleState, runState, Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"), Condition(AnimatorConditionMode.If, 0f, "Sprint"), handsFree);
+            Link(idleState, walkState, Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"), Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), handsFree);
+            Link(walkState, runState, Condition(AnimatorConditionMode.If, 0f, "Sprint"), handsFree);
+            Link(walkState, idleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"), handsFree);
+            Link(runState, walkState, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.2f, "Speed"), handsFree);
+            Link(runState, idleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"), handsFree);
+
+            Link(idleState, carryRunState, carrying, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(idleState, carryWalkState, carrying, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(idleState, carryIdleState, carrying, Condition(AnimatorConditionMode.Less, 0.4f, "Speed"));
+            Link(walkState, carryRunState, carrying, Condition(AnimatorConditionMode.If, 0f, "Sprint"));
+            Link(walkState, carryWalkState, carrying);
+            Link(runState, carryIdleState, carrying, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+            Link(runState, carryWalkState, carrying, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"));
+            Link(runState, carryRunState, carrying);
+
+            Link(carryIdleState, carryRunState, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(carryIdleState, carryWalkState, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(carryWalkState, carryRunState, Condition(AnimatorConditionMode.If, 0f, "Sprint"));
+            Link(carryWalkState, carryIdleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+            Link(carryRunState, carryWalkState, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.2f, "Speed"));
+            Link(carryRunState, carryIdleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+
+            Link(carryRunState, runState, handsFree, Condition(AnimatorConditionMode.If, 0f, "Sprint"));
+            Link(carryWalkState, walkState, handsFree);
+            Link(carryIdleState, idleState, handsFree);
+            Link(carryRunState, idleState, handsFree, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+            Link(carryWalkState, idleState, handsFree, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
 
             AnimatorStateTransition intoJump = machine.AddAnyStateTransition(jumpState);
             intoJump.hasExitTime = false;
@@ -374,9 +418,12 @@ namespace GraveRobbers.Editor
             intoJump.canTransitionToSelf = false;
             intoJump.AddCondition(AnimatorConditionMode.IfNot, 0f, "Grounded");
 
-            Link(jumpState, runState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
-            Link(jumpState, walkState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
-            Link(jumpState, idleState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), Condition(AnimatorConditionMode.Less, 0.4f, "Speed"));
+            Link(jumpState, carryRunState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), carrying, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(jumpState, carryWalkState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), carrying, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(jumpState, carryIdleState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), carrying, Condition(AnimatorConditionMode.Less, 0.4f, "Speed"));
+            Link(jumpState, runState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), handsFree, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(jumpState, walkState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), handsFree, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(jumpState, idleState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), handsFree, Condition(AnimatorConditionMode.Less, 0.4f, "Speed"));
             return controller;
         }
 

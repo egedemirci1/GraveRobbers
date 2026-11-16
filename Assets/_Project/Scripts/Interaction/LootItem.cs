@@ -27,6 +27,8 @@ namespace GraveRobbers.Interaction
 
         Rigidbody _body;
         NetworkTransform _networkTransform;
+        NetworkRigidbody _networkRigidbody;
+        RigidbodyInterpolation _freeInterpolation = RigidbodyInterpolation.Interpolate;
         MeshRenderer[] _renderers = System.Array.Empty<MeshRenderer>();
         Color _baseColor = Color.white;
         bool _highlighted;
@@ -37,6 +39,9 @@ namespace GraveRobbers.Interaction
         {
             _body = GetComponent<Rigidbody>();
             _networkTransform = GetComponent<NetworkTransform>();
+            _networkRigidbody = GetComponent<NetworkRigidbody>();
+            if (_body != null)
+                _freeInterpolation = _body.interpolation;
             if (meshRenderer != null)
                 _renderers = new[] { meshRenderer };
             else
@@ -71,6 +76,56 @@ namespace GraveRobbers.Interaction
         {
             if (_networkTransform != null)
                 _networkTransform.enabled = !held;
+
+            if (_body == null)
+                return;
+
+            if (held)
+            {
+                _body.linearVelocity = Vector3.zero;
+                _body.angularVelocity = Vector3.zero;
+                _body.interpolation = RigidbodyInterpolation.None;
+                _body.useGravity = false;
+                _body.detectCollisions = false;
+                if (_networkRigidbody != null)
+                {
+                    _networkRigidbody.AutoUpdateKinematicState = false;
+                    _networkRigidbody.SetIsKinematic(true);
+                }
+                else
+                {
+                    _body.isKinematic = true;
+                }
+            }
+            else
+            {
+                _body.interpolation = _freeInterpolation;
+                _body.useGravity = true;
+                _body.detectCollisions = true;
+                if (_networkRigidbody != null)
+                {
+                    _networkRigidbody.AutoUpdateKinematicState = true;
+                    _networkRigidbody.SetIsKinematic(!IsServer);
+                }
+                else
+                {
+                    _body.isKinematic = !IsServer;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Puts the carried mesh on the hands. Netcode only accepts another NetworkObject as a
+        /// parent, so the hand bone cannot own this object. Every peer places it after the pose.
+        /// </summary>
+        public void PlaceAt(Vector3 position, Quaternion rotation)
+        {
+            transform.SetPositionAndRotation(position, rotation);
+            if (_body == null)
+                return;
+
+            _body.position = position;
+            _body.rotation = rotation;
         }
 
         public void SetHighlight(bool on)
@@ -97,14 +152,12 @@ namespace GraveRobbers.Interaction
             IsHeld.Value = true;
             HeldByClientId.Value = holderClientId;
 
-            _body.linearVelocity = Vector3.zero;
-            _body.angularVelocity = Vector3.zero;
-            _body.isKinematic = true;
-            _body.detectCollisions = false;
+            // HoldPoint has no NetworkObject, and Netcode refuses that parent.
+            // Attach to the player itself; PickupSystem then moves the mesh onto the hands.
+            NetworkObject player = holdPoint.GetComponentInParent<NetworkObject>();
+            if (player != null)
+                NetworkObject.TrySetParent(player, worldPositionStays: true);
 
-            NetworkObject.TrySetParent(holdPoint, worldPositionStays: false);
-            transform.localPosition = Vector3.zero;
-            transform.localRotation = Quaternion.identity;
             SetHighlight(false);
             return true;
         }
