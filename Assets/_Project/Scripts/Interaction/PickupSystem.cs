@@ -19,7 +19,9 @@ namespace GraveRobbers.Interaction
 
         [Header("Tuning")]
         [SerializeField] float pickupRange = 3f;
+        [SerializeField] float doorRange = 3.5f;
         [SerializeField] float serverMaxDistance = 3.75f;
+        [SerializeField] float doorServerMaxDistance = 5.5f;
         [SerializeField] float throwForce = 14f;
         [SerializeField] LayerMask lootMask;
 
@@ -32,6 +34,7 @@ namespace GraveRobbers.Interaction
         static Sprite _dotSprite;
 
         LootItem _lookTarget;
+        VehicleDoor _lookDoor;
         LootItem _serverHeld;
         GameObject _hudRoot;
         Image _crosshairDot;
@@ -62,6 +65,12 @@ namespace GraveRobbers.Interaction
 
             if (IsOwner)
                 EnsureHud();
+
+            if (IsServer)
+            {
+                VehicleDoorRig.Ensure();
+                SendDoorSnapshot(OwnerClientId);
+            }
 
             RefreshCarrySpeed();
         }
@@ -132,32 +141,66 @@ namespace GraveRobbers.Interaction
 
         void UpdateLookTarget()
         {
-            LootItem next = null;
+            VehicleDoorRig.Ensure();
+            LootItem nextLoot = null;
+            VehicleDoor nextDoor = null;
+            RaycastHit hit = default;
+            bool didHit = false;
 
-            if (!IsHolding && rayOrigin != null &&
-                Physics.Raycast(rayOrigin.position, rayOrigin.forward, out RaycastHit hit, pickupRange, lootMask,
-                    QueryTriggerInteraction.Ignore))
+            if (rayOrigin != null)
             {
-                next = hit.collider.GetComponentInParent<LootItem>();
-                if (next != null && next.IsHeld.Value)
-                    next = null;
+                float range = Mathf.Max(pickupRange, doorRange);
+                RaycastHit[] hits = Physics.RaycastAll(rayOrigin.position, rayOrigin.forward, range, ~0, QueryTriggerInteraction.Ignore);
+                float nearest = float.MaxValue;
+                for (int i = 0; i < hits.Length; i++)
+                {
+                    if (hits[i].collider.transform.IsChildOf(transform))
+                        continue;
+                    if (hits[i].distance >= nearest)
+                        continue;
+
+                    nearest = hits[i].distance;
+                    hit = hits[i];
+                    didHit = true;
+                }
             }
 
-            if (_lookTarget == next)
-                return;
+            if (didHit)
+            {
+                VehicleDoor door = hit.collider.GetComponentInParent<VehicleDoor>();
+                if (door != null && hit.distance <= doorRange)
+                    nextDoor = door;
 
-            if (_lookTarget != null)
-                _lookTarget.SetHighlight(false);
+                if (nextDoor == null && !IsHolding && hit.distance <= pickupRange && ((lootMask.value & (1 << hit.collider.gameObject.layer)) != 0))
+                {
+                    nextLoot = hit.collider.GetComponentInParent<LootItem>();
+                    if (nextLoot != null && nextLoot.IsHeld.Value)
+                        nextLoot = null;
+                }
+            }
 
-            _lookTarget = next;
+            if (_lookTarget != nextLoot)
+            {
+                if (_lookTarget != null)
+                    _lookTarget.SetHighlight(false);
 
-            if (_lookTarget != null)
-                _lookTarget.SetHighlight(true);
+                _lookTarget = nextLoot;
+                if (_lookTarget != null)
+                    _lookTarget.SetHighlight(true);
+            }
 
-            if (_hudRoot == null)
-                EnsureHud();
-
-            SetCrosshairLoot(_lookTarget != null);
+            bool aimed = nextDoor != null || nextLoot != null;
+            if (_lookDoor != nextDoor || _crosshairOnLoot != aimed)
+            {
+                _lookDoor = nextDoor;
+                if (_hudRoot == null)
+                    EnsureHud();
+                SetCrosshairLoot(aimed);
+            }
+            else
+            {
+                _lookDoor = nextDoor;
+            }
         }
 
         void EnsureHud()
@@ -283,7 +326,9 @@ namespace GraveRobbers.Interaction
 
             if (kb.eKey.wasPressedThisFrame)
             {
-                if (IsHolding)
+                if (_lookDoor != null)
+                    RequestToggleDoorServerRpc(_lookDoor.Index);
+                else if (IsHolding)
                     RequestDropServerRpc();
                 else if (_lookTarget != null)
                     RequestPickupServerRpc(_lookTarget.NetworkObject);
@@ -294,6 +339,52 @@ namespace GraveRobbers.Interaction
                 Vector3 dir = rayOrigin != null ? rayOrigin.forward : transform.forward;
                 RequestThrowServerRpc(dir);
             }
+        }
+
+        [ServerRpc]
+        void RequestToggleDoorServerRpc(int doorIndex, ServerRpcParams rpcParams = default)
+        {
+            VehicleDoorRig.Ensure();
+            VehicleDoor[] doors = VehicleDoorRig.Doors;
+            if (doors == null || doorIndex < 0 || doorIndex >= doors.Length)
+                return;
+
+            ulong senderId = rpcParams.Receive.SenderClientId;
+            if (!NetworkManager.ConnectedClients.TryGetValue(senderId, out var client) || client.PlayerObject == null)
+                return;
+
+            if (Vector3.Distance(client.PlayerObject.transform.position, doors[doorIndex].InteractionPoint) > doorServerMaxDistance)
+                return;
+
+            bool[] state = VehicleDoorRig.OpenState;
+            bool open = state == null || doorIndex >= state.Length || !state[doorIndex];
+            VehicleDoorRig.SetOpen(doorIndex, open);
+            ApplyDoorClientRpc(doorIndex, open);
+        }
+
+        [ClientRpc]
+        void ApplyDoorClientRpc(int doorIndex, bool open, ClientRpcParams clientRpcParams = default)
+        {
+            VehicleDoorRig.Ensure();
+            VehicleDoorRig.SetOpen(doorIndex, open);
+        }
+
+        void SendDoorSnapshot(ulong clientId)
+        {
+            bool[] state = VehicleDoorRig.OpenState;
+            if (state == null)
+                return;
+
+            var target = new ClientRpcParams
+            {
+                Send = new ClientRpcSendParams
+                {
+                    TargetClientIds = new[] { clientId }
+                }
+            };
+
+            for (int i = 0; i < state.Length; i++)
+                ApplyDoorClientRpc(i, state[i], target);
         }
 
         [ServerRpc]
