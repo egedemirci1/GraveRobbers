@@ -85,10 +85,16 @@ namespace GraveRobbers.Player
         CapsuleCollider _blocker;
         Collider _seatCollider;
 
+        Transform _seatTruck;
+        Vector3 _seatLocalPos;
+        Quaternion _seatLocalRot;
+        float _seatYaw;
+
         public float SpeedMultiplier { get; set; } = 1f;
         public bool IsSeated { get; private set; }
+        public Vector2 MoveAxes { get; private set; }
 
-        public void BeginSeat(Vector3 feetPosition, Quaternion rotation, Collider seat)
+        public void BeginSeat(Vector3 feetPosition, Quaternion rotation, Collider seat, Transform truck)
         {
             IsSeated = true;
             _velocity = Vector3.zero;
@@ -100,6 +106,14 @@ namespace GraveRobbers.Player
                 _controller.enabled = false;
             if (_blocker != null)
                 _blocker.enabled = false;
+
+            _seatTruck = truck;
+            _seatYaw = 0f;
+            if (truck != null)
+            {
+                _seatLocalPos = truck.InverseTransformPoint(feetPosition);
+                _seatLocalRot = Quaternion.Inverse(truck.rotation) * rotation;
+            }
 
             transform.SetPositionAndRotation(feetPosition, rotation);
             _pitch = 0f;
@@ -117,9 +131,16 @@ namespace GraveRobbers.Player
         public void EndSeat(Vector3 feetPosition, Quaternion rotation)
         {
             IsSeated = false;
+            _seatTruck = null;
             _velocity = Vector3.zero;
             _jumpQueued = false;
+            Vector3 flatForward = Vector3.ProjectOnPlane(rotation * Vector3.forward, Vector3.up);
+            if (flatForward.sqrMagnitude < 0.0001f)
+                flatForward = Vector3.forward;
+            rotation = Quaternion.LookRotation(flatForward.normalized, Vector3.up);
             transform.SetPositionAndRotation(feetPosition, rotation);
+            if (cameraTransform != null)
+                cameraTransform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
             _eyeReady = false;
             IgnoreSeat(null);
 
@@ -322,6 +343,12 @@ namespace GraveRobbers.Player
 
         void LateUpdate()
         {
+            if (IsOwner && IsSeated && _seatTruck != null)
+            {
+                Quaternion look = _seatTruck.rotation * _seatLocalRot * Quaternion.Euler(0f, _seatYaw, 0f);
+                transform.SetPositionAndRotation(_seatTruck.TransformPoint(_seatLocalPos), look);
+            }
+
             KeepHeadBehindCamera();
             if (IsOwner && _localReady)
                 FollowEyes();
@@ -566,6 +593,7 @@ namespace GraveRobbers.Player
             // Esc bakışı kapatmaz; cursor oyun sırasında kilitli kalır.
             _wantCursorLock = lockCursor;
             ApplyCursorState();
+            MoveAxes = _moveAction != null ? _moveAction.ReadValue<Vector2>() : Vector2.zero;
             HandleLook();
             if (IsSeated)
             {
@@ -627,7 +655,10 @@ namespace GraveRobbers.Player
             float yaw = look.x * lookSensitivity;
             float pitchDelta = look.y * lookSensitivity;
 
-            transform.Rotate(0f, yaw, 0f);
+            if (IsSeated)
+                _seatYaw += yaw;
+            else
+                transform.Rotate(0f, yaw, 0f);
 
             _pitch = Mathf.Clamp(_pitch - pitchDelta, minPitch, maxPitch);
             cameraTransform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);

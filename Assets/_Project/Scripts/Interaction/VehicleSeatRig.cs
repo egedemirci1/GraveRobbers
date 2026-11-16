@@ -146,13 +146,6 @@ namespace GraveRobbers.Interaction
                 box.size = filter.sharedMesh.bounds.size;
             }
 
-            if (seat.GetComponent<Rigidbody>() == null)
-            {
-                var body = seat.gameObject.AddComponent<Rigidbody>();
-                body.isKinematic = true;
-                body.useGravity = false;
-            }
-
             var vehicleSeat = seat.GetComponent<VehicleSeat>();
             if (vehicleSeat == null)
                 vehicleSeat = seat.gameObject.AddComponent<VehicleSeat>();

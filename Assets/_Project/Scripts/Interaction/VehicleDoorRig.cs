@@ -98,13 +98,6 @@ namespace GraveRobbers.Interaction
                 box.size = filter.sharedMesh.bounds.size;
             }
 
-            if (door.GetComponent<Rigidbody>() == null)
-            {
-                var body = door.gameObject.AddComponent<Rigidbody>();
-                body.isKinematic = true;
-                body.useGravity = false;
-            }
-
             var vehicleDoor = door.GetComponent<VehicleDoor>();
             if (vehicleDoor == null)
                 vehicleDoor = door.gameObject.AddComponent<VehicleDoor>();

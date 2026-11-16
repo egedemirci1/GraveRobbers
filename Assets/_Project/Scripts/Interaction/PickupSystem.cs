@@ -45,6 +45,8 @@ namespace GraveRobbers.Interaction
         RectTransform _crosshairDotRect;
         RectTransform _crosshairGlowRect;
         bool _crosshairOnLoot;
+        bool _driving;
+        float _driveSend;
 
         public bool IsHolding => _heldLootRef.Value.TryGet(out NetworkObject _);
 
@@ -144,6 +146,7 @@ namespace GraveRobbers.Interaction
                 return;
 
             UpdateLookTarget();
+            TickDrive();
             if (_crosshairOnLoot)
             {
                 float pulse = 0.8f + 0.2f * Mathf.Sin(Time.unscaledTime * 2.2f);
@@ -157,6 +160,7 @@ namespace GraveRobbers.Interaction
         {
             VehicleDoorRig.Ensure();
             VehicleSeatRig.Ensure();
+            PickupVehicle.Ensure();
             LootItem nextLoot = null;
             VehicleDoor nextDoor = null;
             VehicleSeat nextSeat = null;
@@ -171,6 +175,8 @@ namespace GraveRobbers.Interaction
                 for (int i = 0; i < hits.Length; i++)
                 {
                     if (hits[i].collider.transform.IsChildOf(transform))
+                        continue;
+                    if (hits[i].collider.name == "Chassis")
                         continue;
                     if (hits[i].distance >= nearest)
                         continue;
@@ -459,7 +465,14 @@ namespace GraveRobbers.Interaction
                 return;
 
             VehicleSeat seat = seats[seatIndex];
-            playerController.BeginSeat(seat.SitFeet, seat.SitRotation, seat.SeatCollider);
+            PickupVehicle.Ensure();
+            bool wasDriving = _driving;
+            _driving = seat.IsDriverSeat;
+            if (_driving)
+                PickupVehicle.Current?.SetLocalDriver(true);
+            else if (wasDriving)
+                PickupVehicle.Current?.SetLocalDriver(false);
+            playerController.BeginSeat(seat.SitFeet, seat.SitRotation, seat.SeatCollider, seat.Truck);
         }
 
         [ServerRpc]
@@ -484,12 +497,55 @@ namespace GraveRobbers.Interaction
             VehicleSeat[] seats = VehicleSeatRig.Seats;
             if (seats == null || seatIndex < 0 || seatIndex >= seats.Length)
             {
+                if (_driving)
+                    PickupVehicle.Current?.SetLocalDriver(false);
+                _driving = false;
                 playerController.EndSeat(transform.position, transform.rotation);
                 return;
             }
 
             VehicleSeat seat = seats[seatIndex];
+            if (_driving)
+                PickupVehicle.Current?.SetLocalDriver(false);
+            _driving = false;
             playerController.EndSeat(seat.ExitFeet, seat.ExitRotation);
+        }
+
+        void TickDrive()
+        {
+            PickupVehicle vehicle = PickupVehicle.Current;
+            if (vehicle == null || playerController == null)
+                return;
+
+            if (_driving)
+                vehicle.SetInput(playerController.MoveAxes);
+
+            if (!_driving && !vehicle.HasAuthority)
+                return;
+
+            _driveSend += Time.deltaTime;
+            if (_driveSend < 0.05f)
+                return;
+
+            _driveSend = 0f;
+            vehicle.ReadState(out Vector3 position, out Quaternion rotation, out _, out _, out float steer, out float spin);
+            SubmitVehicleStateServerRpc(position, rotation, steer, spin);
+        }
+
+        [ServerRpc]
+        void SubmitVehicleStateServerRpc(Vector3 position, Quaternion rotation, float steer, float spin)
+        {
+            ApplyVehicleStateClientRpc(position, rotation, steer, spin);
+        }
+
+        [ClientRpc]
+        void ApplyVehicleStateClientRpc(Vector3 position, Quaternion rotation, float steer, float spin)
+        {
+            if (IsOwner)
+                return;
+
+            PickupVehicle.Ensure();
+            PickupVehicle.Current?.ApplyRemote(position, rotation, steer, spin);
         }
 
         [ServerRpc]
