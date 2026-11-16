@@ -351,7 +351,9 @@ MonoBehaviour:
   rayOrigin: {fileID: 6377982416593174085}
   playerController: {fileID: 1629743391254410501}
   pickupRange: 3
+  doorRange: 3.5
   serverMaxDistance: 3.75
+  doorServerMaxDistance: 5.5
   throwForce: 14
   lootMask:
     serializedVersion: 2

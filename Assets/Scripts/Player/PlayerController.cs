@@ -229,7 +229,9 @@ namespace GraveRobbers.Player
             visual.name = "Character";
             visual.transform.localPosition = Vector3.zero;
             visual.transform.localRotation = Quaternion.identity;
-            visual.transform.localScale = Vector3.one;
+            // The imported rig stands about 2.47m. The capsule is 1.8m, so the
+            // mesh is scaled to match. Root scale scales the clips with it.
+            visual.transform.localScale = Vector3.one * (1.8f / 2.47f);
 
             if (_walkAnimation == null)
                 _walkAnimation = GetComponent<PlayerWalkAnimation>();

@@ -21,6 +21,9 @@ namespace GraveRobbers.Editor
         const string CarryIdlePath = "Assets/Carrying-idle.fbx";
         const string CarryWalkPath = "Assets/carrying-Walking.fbx";
         const string CarryRunPath = "Assets/Carrying-Running.fbx";
+        const string RifleIdlePath = "Assets/Rifle Idle.fbx";
+        const string RifleWalkPath = "Assets/Walk With Rifle.fbx";
+        const string RifleRunPath = "Assets/Rifle-Run Forward.fbx";
         const string ControllerPath = "Assets/Resources/PlayerLocomotion.controller";
         const string PlayerPath = "Assets/_Project/Prefabs/Player.prefab";
         const string FlagName = "grave_robbers_mixamo_locomotion.flag";
@@ -43,9 +46,10 @@ namespace GraveRobbers.Editor
             }
 
             if (!File.Exists(IdlePath) || !File.Exists(WalkPath) || !File.Exists(RunPath) || !File.Exists(JumpPath)
-                || !File.Exists(CarryIdlePath) || !File.Exists(CarryWalkPath) || !File.Exists(CarryRunPath))
+                || !File.Exists(CarryIdlePath) || !File.Exists(CarryWalkPath) || !File.Exists(CarryRunPath)
+                || !File.Exists(RifleIdlePath) || !File.Exists(RifleWalkPath) || !File.Exists(RifleRunPath))
             {
-                Debug.LogError("Need the locomotion clips and the three carrying clips.");
+                Debug.LogError("Need the locomotion clips, the carrying clips, and the three rifle clips.");
                 return;
             }
 
@@ -75,22 +79,29 @@ namespace GraveRobbers.Editor
             ConfigureClipToIdlePose(CarryIdlePath, loop: true, bakeHeight: true);
             ConfigureClipToIdlePose(CarryWalkPath, loop: true, bakeHeight: true);
             ConfigureClipToIdlePose(CarryRunPath, loop: true, bakeHeight: true);
+            ConfigureClipToIdlePose(RifleIdlePath, loop: true, bakeHeight: true);
+            ConfigureClipToIdlePose(RifleWalkPath, loop: true, bakeHeight: true);
+            ConfigureClipToIdlePose(RifleRunPath, loop: true, bakeHeight: true);
             AnimationClip walk = FindClip(WalkPath);
             AnimationClip run = FindClip(RunPath);
             AnimationClip jump = FindClip(JumpPath);
             AnimationClip carryIdle = FindClip(CarryIdlePath);
             AnimationClip carryWalk = FindClip(CarryWalkPath);
             AnimationClip carryRun = FindClip(CarryRunPath);
-            if (walk == null || run == null || jump == null || carryIdle == null || carryWalk == null || carryRun == null)
+            AnimationClip rifleIdle = FindClip(RifleIdlePath);
+            AnimationClip rifleWalk = FindClip(RifleWalkPath);
+            AnimationClip rifleRun = FindClip(RifleRunPath);
+            if (walk == null || run == null || jump == null || carryIdle == null || carryWalk == null || carryRun == null
+                || rifleIdle == null || rifleWalk == null || rifleRun == null)
             {
-                Debug.LogError("A locomotion or carrying clip has no animation.");
+                Debug.LogError("A locomotion, carrying, or rifle clip has no animation.");
                 return;
             }
 
-            RuntimeAnimatorController controller = CreateController(idle, walk, run, jump, carryIdle, carryWalk, carryRun);
+            RuntimeAnimatorController controller = CreateController(idle, walk, run, jump, carryIdle, carryWalk, carryRun, rifleIdle, rifleWalk, rifleRun);
             AssignPlayer(controller);
             AssetDatabase.SaveAssets();
-            Debug.Log("Idle, Walk, Run, Jump, and carrying clips play on the character's own model.");
+            Debug.Log("Idle, Walk, Run, Jump, carrying, and rifle clips play on the character's own model.");
         }
 
         static void RunIfRequested()
@@ -337,7 +348,10 @@ namespace GraveRobbers.Editor
             AnimationClip jump,
             AnimationClip carryIdle,
             AnimationClip carryWalk,
-            AnimationClip carryRun)
+            AnimationClip carryRun,
+            AnimationClip rifleIdle,
+            AnimationClip rifleWalk,
+            AnimationClip rifleRun)
         {
             if (AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath) != null)
                 AssetDatabase.DeleteAsset(ControllerPath);
@@ -347,6 +361,7 @@ namespace GraveRobbers.Editor
             controller.AddParameter("Sprint", AnimatorControllerParameterType.Bool);
             controller.AddParameter("Grounded", AnimatorControllerParameterType.Bool);
             controller.AddParameter("Carry", AnimatorControllerParameterType.Bool);
+            controller.AddParameter("Armed", AnimatorControllerParameterType.Bool);
 
             AnimatorStateMachine machine = controller.layers[0].stateMachine;
             AnimatorState idleState = machine.AddState("Idle", new Vector3(300f, 0f, 0f));
@@ -356,6 +371,9 @@ namespace GraveRobbers.Editor
             AnimatorState carryIdleState = machine.AddState("CarryIdle", new Vector3(560f, 0f, 0f));
             AnimatorState carryWalkState = machine.AddState("CarryWalk", new Vector3(560f, 70f, 0f));
             AnimatorState carryRunState = machine.AddState("CarryRun", new Vector3(560f, 140f, 0f));
+            AnimatorState rifleIdleState = machine.AddState("RifleIdle", new Vector3(820f, 0f, 0f));
+            AnimatorState rifleWalkState = machine.AddState("RifleWalk", new Vector3(820f, 70f, 0f));
+            AnimatorState rifleRunState = machine.AddState("RifleRun", new Vector3(820f, 140f, 0f));
             idleState.motion = idle;
             walkState.motion = walk;
             runState.motion = run;
@@ -363,6 +381,9 @@ namespace GraveRobbers.Editor
             carryIdleState.motion = carryIdle;
             carryWalkState.motion = carryWalk;
             carryRunState.motion = carryRun;
+            rifleIdleState.motion = rifleIdle;
+            rifleWalkState.motion = rifleWalk;
+            rifleRunState.motion = rifleRun;
             // The capsule already arcs through the air. Sped-up playback of the
             // whole clip (crouch, flight, and landing) fights that arc.
             jumpState.speed = 1f;
@@ -380,13 +401,24 @@ namespace GraveRobbers.Editor
             }
 
             AnimatorCondition handsFree = Condition(AnimatorConditionMode.IfNot, 0f, "Carry");
+            AnimatorCondition notArmed = Condition(AnimatorConditionMode.IfNot, 0f, "Armed");
             AnimatorCondition carrying = Condition(AnimatorConditionMode.If, 0f, "Carry");
-            Link(idleState, runState, Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"), Condition(AnimatorConditionMode.If, 0f, "Sprint"), handsFree);
-            Link(idleState, walkState, Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"), Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), handsFree);
-            Link(walkState, runState, Condition(AnimatorConditionMode.If, 0f, "Sprint"), handsFree);
-            Link(walkState, idleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"), handsFree);
-            Link(runState, walkState, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.2f, "Speed"), handsFree);
-            Link(runState, idleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"), handsFree);
+            AnimatorCondition armed = Condition(AnimatorConditionMode.If, 0f, "Armed");
+            Link(idleState, runState, Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"), Condition(AnimatorConditionMode.If, 0f, "Sprint"), handsFree, notArmed);
+            Link(idleState, walkState, Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"), Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), handsFree, notArmed);
+            Link(walkState, runState, Condition(AnimatorConditionMode.If, 0f, "Sprint"), handsFree, notArmed);
+            Link(walkState, idleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"), handsFree, notArmed);
+            Link(runState, walkState, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.2f, "Speed"), handsFree, notArmed);
+            Link(runState, idleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"), handsFree, notArmed);
+
+            Link(idleState, rifleRunState, armed, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(idleState, rifleWalkState, armed, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(idleState, rifleIdleState, armed, Condition(AnimatorConditionMode.Less, 0.4f, "Speed"));
+            Link(walkState, rifleRunState, armed, Condition(AnimatorConditionMode.If, 0f, "Sprint"));
+            Link(walkState, rifleWalkState, armed);
+            Link(runState, rifleIdleState, armed, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+            Link(runState, rifleWalkState, armed, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"));
+            Link(runState, rifleRunState, armed);
 
             Link(idleState, carryRunState, carrying, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
             Link(idleState, carryWalkState, carrying, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
@@ -404,11 +436,23 @@ namespace GraveRobbers.Editor
             Link(carryRunState, carryWalkState, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.2f, "Speed"));
             Link(carryRunState, carryIdleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
 
-            Link(carryRunState, runState, handsFree, Condition(AnimatorConditionMode.If, 0f, "Sprint"));
-            Link(carryWalkState, walkState, handsFree);
-            Link(carryIdleState, idleState, handsFree);
-            Link(carryRunState, idleState, handsFree, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
-            Link(carryWalkState, idleState, handsFree, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+            Link(carryRunState, runState, handsFree, notArmed, Condition(AnimatorConditionMode.If, 0f, "Sprint"));
+            Link(carryWalkState, walkState, handsFree, notArmed);
+            Link(carryIdleState, idleState, handsFree, notArmed);
+            Link(carryRunState, idleState, handsFree, notArmed, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+            Link(carryWalkState, idleState, handsFree, notArmed, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+
+            Link(rifleIdleState, rifleRunState, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(rifleIdleState, rifleWalkState, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(rifleWalkState, rifleRunState, Condition(AnimatorConditionMode.If, 0f, "Sprint"));
+            Link(rifleWalkState, rifleIdleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+            Link(rifleRunState, rifleWalkState, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.2f, "Speed"));
+            Link(rifleRunState, rifleIdleState, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+            Link(rifleRunState, runState, notArmed, handsFree, Condition(AnimatorConditionMode.If, 0f, "Sprint"));
+            Link(rifleWalkState, walkState, notArmed, handsFree);
+            Link(rifleIdleState, idleState, notArmed, handsFree);
+            Link(rifleRunState, idleState, notArmed, handsFree, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
+            Link(rifleWalkState, idleState, notArmed, handsFree, Condition(AnimatorConditionMode.Less, 0.2f, "Speed"));
 
             AnimatorStateTransition intoJump = machine.AddAnyStateTransition(jumpState);
             intoJump.hasExitTime = false;
@@ -418,12 +462,15 @@ namespace GraveRobbers.Editor
             intoJump.canTransitionToSelf = false;
             intoJump.AddCondition(AnimatorConditionMode.IfNot, 0f, "Grounded");
 
+            Link(jumpState, rifleRunState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), armed, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(jumpState, rifleWalkState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), armed, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(jumpState, rifleIdleState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), armed, Condition(AnimatorConditionMode.Less, 0.4f, "Speed"));
             Link(jumpState, carryRunState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), carrying, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
             Link(jumpState, carryWalkState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), carrying, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
             Link(jumpState, carryIdleState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), carrying, Condition(AnimatorConditionMode.Less, 0.4f, "Speed"));
-            Link(jumpState, runState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), handsFree, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
-            Link(jumpState, walkState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), handsFree, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
-            Link(jumpState, idleState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), handsFree, Condition(AnimatorConditionMode.Less, 0.4f, "Speed"));
+            Link(jumpState, runState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), handsFree, notArmed, Condition(AnimatorConditionMode.If, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(jumpState, walkState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), handsFree, notArmed, Condition(AnimatorConditionMode.IfNot, 0f, "Sprint"), Condition(AnimatorConditionMode.Greater, 0.4f, "Speed"));
+            Link(jumpState, idleState, Condition(AnimatorConditionMode.If, 0f, "Grounded"), handsFree, notArmed, Condition(AnimatorConditionMode.Less, 0.4f, "Speed"));
             return controller;
         }
 

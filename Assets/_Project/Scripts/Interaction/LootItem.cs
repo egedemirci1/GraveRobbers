@@ -35,6 +35,19 @@ namespace GraveRobbers.Interaction
 
         public float Weight => weight;
 
+        public bool IsWeapon
+        {
+            get
+            {
+                string itemName = name;
+                if (!itemName.StartsWith("Weapon_"))
+                    return false;
+
+                return itemName.IndexOf("Smoke", System.StringComparison.OrdinalIgnoreCase) < 0
+                    && itemName.IndexOf("RGD", System.StringComparison.OrdinalIgnoreCase) < 0;
+            }
+        }
+
         void Awake()
         {
             _body = GetComponent<Rigidbody>();

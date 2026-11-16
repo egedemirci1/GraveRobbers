@@ -21,6 +21,7 @@ namespace GraveRobbers.Player
         const string SprintParam = "Sprint";
         const string GroundedParam = "Grounded";
         const string CarryParam = "Carry";
+        const string ArmedParam = "Armed";
 
         [SerializeField] RuntimeAnimatorController controller;
         [SerializeField] RuntimeAnimatorController locomotionController;
@@ -249,10 +250,12 @@ namespace GraveRobbers.Player
                 _pickup = GetComponent<PickupSystem>();
 
             bool running = sprint && speed > StopSpeed;
+            bool armed = _pickup != null && _pickup.IsHoldingWeapon;
             _animator.SetFloat(SpeedParam, speed);
             _animator.SetBool(SprintParam, running);
             _animator.SetBool(GroundedParam, grounded);
-            _animator.SetBool(CarryParam, _pickup != null && _pickup.IsHolding);
+            _animator.SetBool(CarryParam, _pickup != null && _pickup.IsHolding && !armed);
+            _animator.SetBool(ArmedParam, armed);
 
             if (!grounded)
             {

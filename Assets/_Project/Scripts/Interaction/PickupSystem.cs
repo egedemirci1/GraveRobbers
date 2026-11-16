@@ -45,6 +45,11 @@ namespace GraveRobbers.Interaction
 
         public bool IsHolding => _heldLootRef.Value.TryGet(out NetworkObject _);
 
+        public bool IsHoldingWeapon =>
+            _heldLootRef.Value.TryGet(out NetworkObject held)
+            && held.TryGetComponent(out LootItem loot)
+            && loot.IsWeapon;
+
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
@@ -121,7 +126,10 @@ namespace GraveRobbers.Interaction
                 !held.TryGetComponent(out LootItem loot))
                 return;
 
-            CarryGrip.Apply(transform, loot);
+            if (loot.IsWeapon)
+                WeaponGrip.Apply(transform, loot);
+            else
+                CarryGrip.Apply(transform, loot);
         }
 
         void Update()
