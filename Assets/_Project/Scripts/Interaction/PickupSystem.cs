@@ -20,8 +20,10 @@ namespace GraveRobbers.Interaction
         [Header("Tuning")]
         [SerializeField] float pickupRange = 3f;
         [SerializeField] float doorRange = 3.5f;
+        [SerializeField] float seatRange = 3.5f;
         [SerializeField] float serverMaxDistance = 3.75f;
         [SerializeField] float doorServerMaxDistance = 5.5f;
+        [SerializeField] float seatServerMaxDistance = 4.5f;
         [SerializeField] float throwForce = 14f;
         [SerializeField] LayerMask lootMask;
 
@@ -35,6 +37,7 @@ namespace GraveRobbers.Interaction
 
         LootItem _lookTarget;
         VehicleDoor _lookDoor;
+        VehicleSeat _lookSeat;
         LootItem _serverHeld;
         GameObject _hudRoot;
         Image _crosshairDot;
@@ -87,6 +90,9 @@ namespace GraveRobbers.Interaction
             // Only this player's loot — other players' holds are untouched.
             if (IsServer && _serverHeld != null)
                 ServerReleaseHeld(Vector3.zero);
+
+            if (IsServer)
+                VehicleSeatRig.Release(OwnerClientId);
 
             if (IsOwner)
             {
@@ -150,14 +156,16 @@ namespace GraveRobbers.Interaction
         void UpdateLookTarget()
         {
             VehicleDoorRig.Ensure();
+            VehicleSeatRig.Ensure();
             LootItem nextLoot = null;
             VehicleDoor nextDoor = null;
+            VehicleSeat nextSeat = null;
             RaycastHit hit = default;
             bool didHit = false;
 
             if (rayOrigin != null)
             {
-                float range = Mathf.Max(pickupRange, doorRange);
+                float range = Mathf.Max(pickupRange, Mathf.Max(doorRange, seatRange));
                 RaycastHit[] hits = Physics.RaycastAll(rayOrigin.position, rayOrigin.forward, range, ~0, QueryTriggerInteraction.Ignore);
                 float nearest = float.MaxValue;
                 for (int i = 0; i < hits.Length; i++)
@@ -179,7 +187,17 @@ namespace GraveRobbers.Interaction
                 if (door != null && hit.distance <= doorRange)
                     nextDoor = door;
 
-                if (nextDoor == null && !IsHolding && hit.distance <= pickupRange && ((lootMask.value & (1 << hit.collider.gameObject.layer)) != 0))
+                if (nextDoor == null)
+                {
+                    VehicleSeat seat = hit.collider.GetComponentInParent<VehicleSeat>();
+                    if (seat != null && hit.distance <= seatRange)
+                        nextSeat = seat;
+                    if (nextSeat != null && playerController != null && playerController.IsSeated &&
+                        Vector3.Distance(transform.position, nextSeat.SitFeet) < 0.75f)
+                        nextSeat = null;
+                }
+
+                if (nextDoor == null && nextSeat == null && !IsHolding && hit.distance <= pickupRange && ((lootMask.value & (1 << hit.collider.gameObject.layer)) != 0))
                 {
                     nextLoot = hit.collider.GetComponentInParent<LootItem>();
                     if (nextLoot != null && nextLoot.IsHeld.Value)
@@ -197,10 +215,11 @@ namespace GraveRobbers.Interaction
                     _lookTarget.SetHighlight(true);
             }
 
-            bool aimed = nextDoor != null || nextLoot != null;
-            if (_lookDoor != nextDoor || _crosshairOnLoot != aimed)
+            bool aimed = nextDoor != null || nextSeat != null || nextLoot != null;
+            if (_lookDoor != nextDoor || _lookSeat != nextSeat || _crosshairOnLoot != aimed)
             {
                 _lookDoor = nextDoor;
+                _lookSeat = nextSeat;
                 if (_hudRoot == null)
                     EnsureHud();
                 SetCrosshairLoot(aimed);
@@ -208,6 +227,7 @@ namespace GraveRobbers.Interaction
             else
             {
                 _lookDoor = nextDoor;
+                _lookSeat = nextSeat;
             }
         }
 
@@ -334,8 +354,19 @@ namespace GraveRobbers.Interaction
 
             if (kb.eKey.wasPressedThisFrame)
             {
-                if (_lookDoor != null)
+                if (playerController != null && playerController.IsSeated)
+                {
+                    if (_lookDoor != null)
+                        RequestToggleDoorServerRpc(_lookDoor.Index);
+                    else if (_lookSeat != null)
+                        RequestSitServerRpc(_lookSeat.Index);
+                    else
+                        RequestStandServerRpc();
+                }
+                else if (_lookDoor != null)
                     RequestToggleDoorServerRpc(_lookDoor.Index);
+                else if (_lookSeat != null)
+                    RequestSitServerRpc(_lookSeat.Index);
                 else if (IsHolding)
                     RequestDropServerRpc();
                 else if (_lookTarget != null)
@@ -393,6 +424,72 @@ namespace GraveRobbers.Interaction
 
             for (int i = 0; i < state.Length; i++)
                 ApplyDoorClientRpc(i, state[i], target);
+        }
+
+        [ServerRpc]
+        void RequestSitServerRpc(int seatIndex, ServerRpcParams rpcParams = default)
+        {
+            VehicleSeatRig.Ensure();
+            VehicleSeat[] seats = VehicleSeatRig.Seats;
+            if (seats == null || seatIndex < 0 || seatIndex >= seats.Length)
+                return;
+
+            ulong senderId = rpcParams.Receive.SenderClientId;
+            if (!NetworkManager.ConnectedClients.TryGetValue(senderId, out var client) || client.PlayerObject == null)
+                return;
+
+            if (Vector3.Distance(client.PlayerObject.transform.position, seats[seatIndex].InteractionPoint) > seatServerMaxDistance)
+                return;
+
+            if (!VehicleSeatRig.TryClaim(seatIndex, senderId))
+                return;
+
+            SitClientRpc(seatIndex);
+        }
+
+        [ClientRpc]
+        void SitClientRpc(int seatIndex)
+        {
+            if (!IsOwner || playerController == null)
+                return;
+
+            VehicleSeatRig.Ensure();
+            VehicleSeat[] seats = VehicleSeatRig.Seats;
+            if (seats == null || seatIndex < 0 || seatIndex >= seats.Length)
+                return;
+
+            VehicleSeat seat = seats[seatIndex];
+            playerController.BeginSeat(seat.SitFeet, seat.SitRotation, seat.SeatCollider);
+        }
+
+        [ServerRpc]
+        void RequestStandServerRpc(ServerRpcParams rpcParams = default)
+        {
+            ulong senderId = rpcParams.Receive.SenderClientId;
+            int seatIndex = VehicleSeatRig.IndexOf(senderId);
+            if (seatIndex < 0)
+                return;
+
+            VehicleSeatRig.Release(senderId);
+            StandClientRpc(seatIndex);
+        }
+
+        [ClientRpc]
+        void StandClientRpc(int seatIndex)
+        {
+            if (!IsOwner || playerController == null)
+                return;
+
+            VehicleSeatRig.Ensure();
+            VehicleSeat[] seats = VehicleSeatRig.Seats;
+            if (seats == null || seatIndex < 0 || seatIndex >= seats.Length)
+            {
+                playerController.EndSeat(transform.position, transform.rotation);
+                return;
+            }
+
+            VehicleSeat seat = seats[seatIndex];
+            playerController.EndSeat(seat.ExitFeet, seat.ExitRotation);
         }
 
         [ServerRpc]

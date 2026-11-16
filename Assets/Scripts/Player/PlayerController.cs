@@ -83,8 +83,71 @@ namespace GraveRobbers.Player
         Vector3 _eyeLocal;
         bool _eyeReady;
         CapsuleCollider _blocker;
+        Collider _seatCollider;
 
         public float SpeedMultiplier { get; set; } = 1f;
+        public bool IsSeated { get; private set; }
+
+        public void BeginSeat(Vector3 feetPosition, Quaternion rotation, Collider seat)
+        {
+            IsSeated = true;
+            _velocity = Vector3.zero;
+            _jumpQueued = false;
+            _sprinting = false;
+            IgnoreSeat(seat);
+
+            if (_controller != null)
+                _controller.enabled = false;
+            if (_blocker != null)
+                _blocker.enabled = false;
+
+            transform.SetPositionAndRotation(feetPosition, rotation);
+            _pitch = 0f;
+            if (cameraTransform != null)
+                cameraTransform.localRotation = Quaternion.identity;
+
+            _animSpeed.Value = 0f;
+            _animSprint.Value = false;
+            _animGrounded.Value = true;
+            if (_walkAnimation == null)
+                _walkAnimation = GetComponent<PlayerWalkAnimation>();
+            _walkAnimation?.SetLocomotion(0f, false, true);
+        }
+
+        public void EndSeat(Vector3 feetPosition, Quaternion rotation)
+        {
+            IsSeated = false;
+            _velocity = Vector3.zero;
+            _jumpQueued = false;
+            transform.SetPositionAndRotation(feetPosition, rotation);
+            _eyeReady = false;
+            IgnoreSeat(null);
+
+            if (_blocker != null)
+                _blocker.enabled = true;
+            if (_controller != null && IsOwner)
+                _controller.enabled = true;
+        }
+
+        void IgnoreSeat(Collider seat)
+        {
+            if (_seatCollider != null)
+            {
+                if (_controller != null)
+                    Physics.IgnoreCollision(_controller, _seatCollider, false);
+                if (_blocker != null)
+                    Physics.IgnoreCollision(_blocker, _seatCollider, false);
+            }
+
+            _seatCollider = seat;
+            if (seat == null)
+                return;
+
+            if (_controller != null)
+                Physics.IgnoreCollision(_controller, seat, true);
+            if (_blocker != null)
+                Physics.IgnoreCollision(_blocker, seat, true);
+        }
 
         void Awake()
         {
@@ -292,7 +355,16 @@ namespace GraveRobbers.Player
                 up = transform.up;
 
             Vector3 eyes = _headBone.position + up.normalized * (up.magnitude * 0.28f);
-            Vector3 local = transform.InverseTransformPoint(eyes + FlatForward() * 0.3f);
+            float lead = IsSeated ? 0.16f : 0.3f;
+            Vector3 local = transform.InverseTransformPoint(eyes + FlatForward() * lead);
+            if (IsSeated)
+            {
+                local.y -= 0.18f;
+                _eyeLocal = local;
+                cameraTransform.localPosition = _eyeLocal;
+                return;
+            }
+
             bool grounded = _animGrounded.Value;
 
             if (!_eyeReady)
@@ -495,6 +567,21 @@ namespace GraveRobbers.Player
             _wantCursorLock = lockCursor;
             ApplyCursorState();
             HandleLook();
+            if (IsSeated)
+            {
+                _velocity = Vector3.zero;
+                _jumpQueued = false;
+                if (_animSpeed.Value != 0f || _animSprint.Value)
+                {
+                    _animSpeed.Value = 0f;
+                    _animSprint.Value = false;
+                    _animGrounded.Value = true;
+                    _walkAnimation?.SetLocomotion(0f, false, true);
+                }
+
+                return;
+            }
+
             HandleMove();
         }
 
