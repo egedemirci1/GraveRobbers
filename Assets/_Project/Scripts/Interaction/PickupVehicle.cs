@@ -22,6 +22,7 @@ namespace GraveRobbers.Interaction
             public Transform Visual;
             public Vector3 RestLocalPos;
             public Quaternion RestLocalRot;
+            public Vector3 RestCenterLocal;
             public Vector3 MeshCenter;
             public Vector3 Axle;
             public bool Steer;
@@ -164,6 +165,9 @@ namespace GraveRobbers.Interaction
             for (int i = 0; i < scored.Count; i++)
             {
                 Transform visual = scored[i].visual;
+                // Rear tires are larger than the bed arch and their mesh sits behind the pivot.
+                if (i >= 2)
+                    FitRearWheel(visual, truck);
                 Vector3 hub = WheelHub(visual, out float radius);
                 var colliderObject = new GameObject(visual.name + " Collider");
                 colliderObject.transform.SetParent(truck, false);
@@ -179,6 +183,7 @@ namespace GraveRobbers.Interaction
                     Visual = visual,
                     RestLocalPos = visual.localPosition,
                     RestLocalRot = visual.localRotation,
+                    RestCenterLocal = truck.InverseTransformPoint(hub),
                     MeshCenter = MeshCenter(visual),
                     Axle = ThinAxis(visual),
                     Steer = i < 2,
@@ -303,13 +308,14 @@ namespace GraveRobbers.Interaction
                     continue;
 
                 Transform parent = visual.parent != null ? visual.parent : transform;
-                Vector3 center = _wheels[i].MeshCenter;
-                Vector3 hub = parent.TransformPoint(_wheels[i].RestLocalPos + _wheels[i].RestLocalRot * center);
+                Vector3 pivot = parent.TransformPoint(_wheels[i].RestCenterLocal);
                 Quaternion restWorld = parent.rotation * _wheels[i].RestLocalRot;
                 Quaternion steer = _wheels[i].Steer ? Quaternion.AngleAxis(_steer, transform.up) : Quaternion.identity;
                 Vector3 axle = _wheels[i].Axle.sqrMagnitude > 0.001f ? _wheels[i].Axle.normalized : Vector3.right;
                 Quaternion spun = steer * restWorld * Quaternion.AngleAxis(_spin, axle);
-                visual.SetPositionAndRotation(hub - spun * center, spun);
+                float scale = visual.lossyScale.x;
+                Vector3 center = _wheels[i].MeshCenter * scale;
+                visual.SetPositionAndRotation(pivot - spun * center, spun);
             }
 
             if (_steering != null)
@@ -425,6 +431,28 @@ namespace GraveRobbers.Interaction
             }
 
             return Vector3.ProjectOnPlane(truck.forward, up).normalized;
+        }
+
+        static void FitRearWheel(Transform visual, Transform truck)
+        {
+            var renderer = visual.GetComponent<Renderer>();
+            if (renderer == null)
+                return;
+
+            // The bed arch is about two thirds of the modeled tire. Shrink around
+            // the ground contact so the top clears the bed and the truck stays level.
+            const float fit = 0.62f;
+            Vector3 up = truck.up.sqrMagnitude > 0.001f ? truck.up.normalized : Vector3.up;
+            Bounds bounds = renderer.bounds;
+            float radius = Mathf.Max(bounds.extents.x, Mathf.Max(bounds.extents.y, bounds.extents.z));
+            Vector3 center = bounds.center;
+            Vector3 bottom = center - up * radius;
+            Vector3 originToCenter = center - visual.position;
+
+            visual.localScale *= fit;
+            Vector3 scaledCenter = visual.position + originToCenter * fit;
+            Vector3 desiredCenter = bottom + up * (radius * fit);
+            visual.position += desiredCenter - scaledCenter;
         }
 
         static Vector3 WheelHub(Transform visual, out float radius)

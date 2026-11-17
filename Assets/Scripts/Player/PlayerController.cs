@@ -386,7 +386,6 @@ namespace GraveRobbers.Player
             Vector3 local = transform.InverseTransformPoint(eyes + FlatForward() * lead);
             if (IsSeated)
             {
-                local.y -= 0.18f;
                 _eyeLocal = local;
                 cameraTransform.localPosition = _eyeLocal;
                 return;

@@ -77,9 +77,10 @@ namespace GraveRobbers.Interaction
             float centerAlong = Vector3.Dot(bounds.center, up);
             float bottom = centerAlong - halfAlong;
             float cushion = bottom + halfAlong * 2f * 0.30f;
-            const float hipHeight = 0.9f;
-            const float roofClearance = 0.32f;
-            Vector3 sitFeet = bounds.center + up * ((cushion - hipHeight - roofClearance) - centerAlong);
+            // The rig is scaled to the 1.8m capsule, so the old roof sink puts
+            // the head under the cushion. Hips sit on the seat instead.
+            const float hipHeight = 0.72f;
+            Vector3 sitFeet = bounds.center + up * ((cushion - hipHeight) - centerAlong);
 
             Vector3 flatFace = Vector3.ProjectOnPlane(face, up);
             if (flatFace.sqrMagnitude < 0.0001f)
